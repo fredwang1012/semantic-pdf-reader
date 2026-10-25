@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import numpy as np
-from rank_bm25 import BM25Okapi
+from rank_bm25 import BM25Plus
 
 from .chunks import Chunk
 
@@ -39,7 +39,9 @@ class Index:
         usable = embeddings is not None and embedder is not None and len(embeddings) == len(chunks)
         self.embeddings = embeddings if usable else None
         self.embedder = embedder if usable else None
-        self._bm25 = BM25Okapi([tokenize(c.text) for c in chunks]) if chunks else None
+        # BM25Plus rather than Okapi: Okapi's idf is 0 for a term in half the chunks, so a short document (a few
+        # chunks) would score its own words 0 and never match.
+        self._bm25 = BM25Plus([tokenize(c.text) for c in chunks]) if chunks else None
 
     @property
     def mode(self) -> str:
