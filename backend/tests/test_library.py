@@ -6,6 +6,12 @@ from app.library import Library, NoTextLayer
 from .conftest import FakeEmbedder, make_pdf
 
 
+# Each page is padded past the chunk minimum so it becomes its own chunk (a one-chunk document scores 0 everywhere).
+def _two_pages(first: str, second: str = "Nothing relevant here.") -> bytes:
+    pad = " The quick brown fox jumps over the lazy dog while the committee reviews the quarterly budget at length again and again." * 2
+    return make_pdf([[first + pad], [second + pad]])
+
+
 @pytest.fixture
 def lib():
     return Library(settings.docs_dir)
@@ -76,3 +82,22 @@ def test_a_fresh_library_on_the_same_root_still_searches(sample_pdf):
     index = again.index(meta.id)
     assert index.mode == "hybrid"
     assert index.search("Adam optimizer")[0].chunk.page == 2
+
+
+def test_search_all_groups_by_document_best_first(lib):
+    plants = lib.add(_two_pages("Photosynthesis lets plants turn sunlight into food."), "plants.pdf")
+    both = lib.add(_two_pages("Plants and rockets.", "Rockets burn fuel to reach orbit."),
+                   "rockets.pdf")
+    only_rockets = lib.search_all("orbit")
+    assert [m.id for m, _ in only_rockets] == [both.id]
+    groups = lib.search_all("plants")
+    assert {m.id for m, _ in groups} == {plants.id, both.id}
+    scores = [hits[0].score for _, hits in groups]
+    assert scores == sorted(scores, reverse=True)
+    assert lib.search_all("plants", max_docs=1)[0][0].id == groups[0][0].id
+    assert all(len(hits) <= 1 for _, hits in lib.search_all("plants", k_per_doc=1))
+    assert lib.search_all("zebra") == []
+
+
+def test_search_all_on_an_empty_library(lib):
+    assert lib.search_all("anything") == []

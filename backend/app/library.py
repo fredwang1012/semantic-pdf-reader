@@ -15,7 +15,7 @@ import numpy as np
 
 from .chunks import Chunk, make_chunks
 from .pdftext import extract, title_of
-from .retrieval import Embedder, Index
+from .retrieval import Embedder, Hit, Index
 
 DOC_ID = re.compile(r"^[0-9a-f]{16}$")
 
@@ -124,3 +124,17 @@ class Library:
             emb = np.load(emb_path) if emb_path.is_file() else None
             self._indexes[id_] = Index(chunks, emb, self.embedder)
         return self._indexes[id_]
+
+    def search_all(self, query: str, k_per_doc: int = 3, max_docs: int = 10) -> "list[tuple[DocMeta, list[Hit]]]":
+        """Search every document; keep each one's top hits, drop those with none, best document first.
+
+        Documents are scored independently: hybrid and BM25-only scores both lie in [0, 1] but are not
+        calibrated across documents, so the ordering between documents is a rough guide only.
+        """
+        groups = []
+        for meta in self.list():
+            hits = self.index(meta.id).search(query, k_per_doc)
+            if hits:
+                groups.append((meta, hits))
+        groups.sort(key=lambda g: g[1][0].score, reverse=True)
+        return groups[:max_docs]

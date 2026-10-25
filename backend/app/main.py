@@ -1,4 +1,4 @@
-"""FastAPI app: upload PDFs, list the library, serve the PDF bytes, and search a document."""
+"""FastAPI app: upload PDFs, list the library, serve the PDF bytes, and search one document or the whole library."""
 import asyncio
 from pathlib import Path
 
@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import ROOT, settings
 from .embedder import get_embedder
 from .library import Library, NoTextLayer
-from .retrieval import DEFAULT_K
+from .retrieval import DEFAULT_K, Hit
 
 app = FastAPI(title="Semantic PDF Reader")
 app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
@@ -76,12 +76,23 @@ def delete_doc(doc_id: str):
     library().delete(doc_id)
 
 
+def _results(hits: list[Hit]) -> list[dict]:
+    return [{**h.chunk.to_json(), "score": round(h.score, 4)} for h in hits]
+
+
+@app.get("/api/search")
+async def search_all(q: str = Query(min_length=1, max_length=500), k: int = Query(3, ge=1, le=20)):
+    groups = await asyncio.to_thread(library().search_all, q, k)
+    return {"groups": [{"doc": meta.to_json(), "mode": library().index(meta.id).mode,
+                        "results": _results(hits)} for meta, hits in groups]}
+
+
 @app.get("/api/docs/{doc_id}/search")
 async def search(doc_id: str, q: str = Query(min_length=1, max_length=500), k: int = Query(DEFAULT_K, ge=1, le=50)):
     _meta_or_404(doc_id)
     index = library().index(doc_id)
     hits = await asyncio.to_thread(index.search, q, k)
-    return {"mode": index.mode, "results": [{**h.chunk.to_json(), "score": round(h.score, 4)} for h in hits]}
+    return {"mode": index.mode, "results": _results(hits)}
 
 
 _dist = ROOT / "frontend" / "dist"

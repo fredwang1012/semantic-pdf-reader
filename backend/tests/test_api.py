@@ -6,6 +6,12 @@ from app.main import app
 from .conftest import make_pdf
 
 
+# Each page is padded past the chunk minimum so it becomes its own chunk (a one-chunk document scores 0 everywhere).
+def _two_pages(first: str, second: str = "Nothing relevant here.") -> bytes:
+    pad = " The quick brown fox jumps over the lazy dog while the committee reviews the quarterly budget at length again and again." * 2
+    return make_pdf([[first + pad], [second + pad]])
+
+
 @pytest.fixture
 def client():
     with TestClient(app) as c:
@@ -68,3 +74,22 @@ def test_delete_then_gone(client):
     id_ = _upload(client, make_pdf()).json()["id"]
     assert client.delete(f"/api/docs/{id_}").status_code == 204
     assert client.get(f"/api/docs/{id_}").status_code == 404
+
+
+def test_library_search_groups_results_by_document(client):
+    first = _upload(client, _two_pages("Photosynthesis lets plants turn sunlight into food."), "plants.pdf").json()
+    second = _upload(client, _two_pages("Rockets burn fuel to reach orbit.", "Plants stay on the ground."),
+                     "rockets.pdf").json()
+    groups = client.get("/api/search", params={"q": "orbit"}).json()["groups"]
+    assert [g["doc"]["id"] for g in groups] == [second["id"]]
+    assert groups[0]["mode"] == "bm25" and len(groups[0]["results"][0]["rects"][0]) == 5
+    both = client.get("/api/search", params={"q": "plants"}).json()["groups"]
+    assert {g["doc"]["id"] for g in both} == {first["id"], second["id"]}
+    scores = [g["results"][0]["score"] for g in both]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_library_search_empty_library_and_validation(client):
+    assert client.get("/api/search", params={"q": "x"}).json() == {"groups": []}
+    assert client.get("/api/search", params={"q": ""}).status_code == 422
+    assert client.get("/api/search", params={"q": "x", "k": 21}).status_code == 422
