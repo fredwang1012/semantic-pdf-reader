@@ -141,3 +141,18 @@ def test_docs_still_served_when_the_embedder_cannot_load(client, monkeypatch):
     assert client.get("/api/health").json()["search"] == "bm25"
     assert embedder.get_embedder() is None
     assert len(calls) == 1
+
+
+def test_mjs_is_served_as_javascript_so_the_pdf_worker_loads(tmp_path):
+    from fastapi import FastAPI
+    from fastapi.staticfiles import StaticFiles
+
+    (tmp_path / "index.html").write_text("<!doctype html>")
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "worker.mjs").write_text("export {};")
+    site = FastAPI()
+    site.mount("/", StaticFiles(directory=tmp_path, html=True), name="site")
+
+    r = TestClient(site).get("/assets/worker.mjs")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/javascript")
