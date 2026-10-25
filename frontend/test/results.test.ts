@@ -28,13 +28,32 @@ describe("markTerms", () => {
     expect(markTerms("a big cat", "a")).toEqual([{ text: "a big cat", hit: false }]);
   });
 
-  it("escapes regex characters", () => {
+  it("ignores punctuation and regex characters in the query", () => {
     expect(markTerms("cost (usd) now", "(usd)")).toEqual([
-      { text: "cost ", hit: false },
-      { text: "(usd)", hit: true },
-      { text: " now", hit: false },
+      { text: "cost (", hit: false },
+      { text: "usd", hit: true },
+      { text: ") now", hit: false },
     ]);
     expect(() => markTerms("x", "[ ** ")).not.toThrow();
+    expect(markTerms("x [ ** y", "[ ** ")).toEqual([{ text: "x [ ** y", hit: false }]);
+  });
+
+  it("marks only whole words of a natural-language question", () => {
+    const parts = markTerms(
+      "Photosynthesis turns light into sugar; NADPH drives it, and photosynthesis stops without it.",
+      "What is NADPH used for in photosynthesis?",
+    );
+    expect(parts.filter((p) => p.hit).map((p) => p.text)).toEqual(["Photosynthesis", "NADPH", "photosynthesis"]);
+  });
+
+  it("does not match inside longer words", () => {
+    expect(markTerms("turns into sugar", "in is")).toEqual([{ text: "turns into sugar", hit: false }]);
+  });
+
+  it("prefers the longest word and handles Unicode letters", () => {
+    const parts = markTerms("a carpet and a car", "car carpet");
+    expect(parts.filter((p) => p.hit).map((p) => p.text)).toEqual(["carpet", "car"]);
+    expect(markTerms("la naïve idée", "naïve").filter((p) => p.hit).map((p) => p.text)).toEqual(["naïve"]);
   });
 
   it("marks several words and handles empty input", () => {

@@ -7,6 +7,7 @@ export type Scope = "doc" | "library";
 
 interface Props {
   docs: DocMeta[];
+  loading: boolean;
   currentId: string | null;
   scope: Scope;
   onScope: (s: Scope) => void;
@@ -28,7 +29,7 @@ interface Found {
   groups: Group[];
 }
 
-export default function SearchPanel({ docs, currentId, scope, onScope, onOpen, children }: Props) {
+export default function SearchPanel({ docs, loading, currentId, scope, onScope, onOpen, children }: Props) {
   const [query, setQuery] = useState("");
   const [found, setFound] = useState<Found | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +40,7 @@ export default function SearchPanel({ docs, currentId, scope, onScope, onOpen, c
   const latest = useRef(0);
 
   const needsDoc = scope === "doc" && currentId === null;
-  const hint = needsDoc ? (docs.length === 0 ? "Upload a PDF to start" : "Pick a PDF") : null;
+  const hint = needsDoc ? (loading ? "Loading…" : docs.length === 0 ? "Upload a PDF to start" : "Pick a PDF") : null;
 
   // Results belong to the scope (and, for one PDF, the document) they were fetched for.
   const resultsKey = scope === "doc" ? currentId : null;
@@ -66,7 +67,12 @@ export default function SearchPanel({ docs, currentId, scope, onScope, onOpen, c
     list.current?.querySelector('[aria-current="true"]')?.scrollIntoView({ block: "nearest" });
   }, [selected, found]);
 
-  const flat = useMemo(() => found?.groups.flatMap((g) => g.items) ?? [], [found]);
+  // Library results can outlive a delete: drop groups for documents that are gone.
+  const groups = useMemo(
+    () => found?.groups.filter((g) => g.doc === null || docs.some((d) => d.id === g.doc!.id)) ?? [],
+    [found, docs],
+  );
+  const flat = useMemo(() => groups.flatMap((g) => g.items), [groups]);
 
   async function run() {
     const q = query.trim();
@@ -92,7 +98,10 @@ export default function SearchPanel({ docs, currentId, scope, onScope, onOpen, c
       setFound({ query: q, mode, groups });
       setSelected(0);
     } catch (e) {
-      if (id === latest.current) setError(e instanceof ApiError ? e.message : "Search failed");
+      if (id === latest.current) {
+        setFound(null);
+        setError(e instanceof ApiError ? e.message : "Search failed");
+      }
     } finally {
       if (id === latest.current) setBusy(false);
     }
@@ -165,7 +174,7 @@ export default function SearchPanel({ docs, currentId, scope, onScope, onOpen, c
           )}
           {!busy && !error && !found && (
             <p className="p-3 text-sm text-[var(--ink-soft)]">
-              {docs.length === 0 ? "Upload a PDF to start" : (hint ?? "Type a query and press Enter")}
+              {loading ? "Loading…" : docs.length === 0 ? "Upload a PDF to start" : (hint ?? "Type a query and press Enter")}
             </p>
           )}
           {!busy && found && flat.length === 0 && (
@@ -176,7 +185,7 @@ export default function SearchPanel({ docs, currentId, scope, onScope, onOpen, c
               <p className="px-3 pt-2 text-xs text-[var(--ink-soft)]">
                 {flat.length} {flat.length === 1 ? "result" : "results"} · {found.mode}
               </p>
-              {found.groups.map((g) => (
+              {groups.map((g) => (
                 <div key={g.doc?.id ?? "current"}>
                   {g.doc && (
                     <h2 className="truncate px-3 pt-3 text-xs font-semibold tracking-wide uppercase">

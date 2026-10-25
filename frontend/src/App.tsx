@@ -30,6 +30,7 @@ function save(key: string, value: string | null) {
 
 export default function App() {
   const [docs, setDocs] = useState<DocMeta[]>([]);
+  const [loading, setLoading] = useState(true);
   const [currentId, setCurrentId] = useState<string | null>(() => load(DOC_KEY));
   const [scope, setScope] = useState<Scope>(() => (load(SCOPE_KEY) === "library" ? "library" : "doc"));
   const [target, setTarget] = useState<ViewerTarget | null>(null);
@@ -40,9 +41,13 @@ export default function App() {
     listDocs().then(
       (list) => {
         setDocs(list);
+        setLoading(false);
         setCurrentId((id) => (list.some((d) => d.id === id) ? id : null));
       },
-      () => setLoadError("Could not load the library"),
+      () => {
+        setLoading(false);
+        setLoadError("Could not load the library");
+      },
     );
   }, []);
 
@@ -73,21 +78,22 @@ export default function App() {
 
   // Document and target change in one update so the viewer loads the new file, then highlights.
   function open(docId: string, rects: Rect[]) {
+    if (!docs.some((d) => d.id === docId)) return; // a result for a document deleted since the search
     setCurrentId(docId);
     setTarget({ rects, key: ++targetKey.current });
   }
 
   return (
     <div className="flex h-screen">
-      <Library docs={docs} currentId={currentId} onSelect={select} onUploaded={uploaded} onDeleted={deleted} />
-      <SearchPanel docs={docs} currentId={currentId} scope={scope} onScope={setScope} onOpen={open}>
+      <Library docs={docs} loading={loading} currentId={currentId} onSelect={select} onUploaded={uploaded} onDeleted={deleted} />
+      <SearchPanel docs={docs} loading={loading} currentId={currentId} scope={scope} onScope={setScope} onOpen={open}>
         {current ? (
           <Suspense fallback={<p className="p-6 text-sm text-[var(--ink-soft)]">Loading…</p>}>
             <PdfViewer key={current.id} url={pdfUrl(current.id)} pageSizes={current.page_sizes} target={target} />
           </Suspense>
         ) : (
           <p className="p-6 text-sm text-[var(--ink-soft)]">
-            {loadError ?? (docs.length === 0 ? "Upload a PDF to start" : "Pick a PDF")}
+            {loadError ?? (loading ? "Loading…" : docs.length === 0 ? "Upload a PDF to start" : "Pick a PDF")}
           </p>
         )}
       </SearchPanel>

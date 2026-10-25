@@ -14,13 +14,19 @@ export interface Part {
   hit: boolean;
 }
 
-/** Split text into parts, flagging case-insensitive matches of query words of 2+ characters. */
+/** Split text into parts, flagging whole-word, case-insensitive matches of the query's words of 2+ characters. */
 export function markTerms(text: string, query: string): Part[] {
-  const words = [...new Set(query.toLowerCase().split(/\s+/).filter((w) => w.length >= 2))];
+  const seen = new Set<string>();
+  const words = (query.match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => {
+    const key = w.toLowerCase();
+    if (w.length < 2 || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   if (!text) return [];
   if (words.length === 0) return [{ text, hit: false }];
-  const escaped = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const re = new RegExp(escaped.join("|"), "gi");
+  words.sort((a, b) => b.length - a.length);
+  const re = new RegExp(String.raw`(?<![\p{L}\p{N}])(${words.join("|")})(?![\p{L}\p{N}])`, "giu");
   const parts: Part[] = [];
   let last = 0;
   for (const m of text.matchAll(re)) {
