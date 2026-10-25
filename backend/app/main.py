@@ -1,5 +1,6 @@
 """FastAPI app: upload PDFs, list the library, serve the PDF bytes, and search one document or the whole library."""
 import asyncio
+import mimetypes
 import threading
 from pathlib import Path
 
@@ -103,6 +104,9 @@ async def search(doc_id: str, q: str = Query(min_length=1, max_length=500), k: i
         raise HTTPException(404, "no such document") from None
     return {"mode": mode, "results": _results(hits)}
 
+
+# Windows maps .mjs to text/plain in the registry, and browsers refuse to run the pdf.js worker module under that type.
+mimetypes.add_type("text/javascript", ".mjs")
 
 _dist = ROOT / "frontend" / "dist"
 if (_dist / "index.html").is_file():
