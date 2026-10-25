@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+:root {
+  --ground: #f3f2ef; /* app chrome */
+  --ground-edge: #dcdad4;
+  --ink: #23221f;
+  --ink-soft: #6a675f;
+  --paper: #fffefb; /* page area */
+  --highlight: rgb(245 176 30 / 0.4); /* passage highlights */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #1b1b19;
+    --ground-edge: #33322e;
+    --ink: #e8e6e0;
+    --ink-soft: #9b978d;
+    --paper: #f1efe8;
+    --highlight: rgb(245 176 30 / 0.45);
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+}
