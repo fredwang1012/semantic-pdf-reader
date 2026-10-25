@@ -47,6 +47,8 @@ def join_lines(texts: list[str]) -> str:
             continue
         if out and _HYPHEN_BREAK.search(out) and t[0].islower():
             out = out[:-1] + t
+        elif out and _HYPHEN_BREAK.search(out) and t[0].isalnum():
+            out += t
         else:
             out = f"{out} {t}" if out else t
     return out
