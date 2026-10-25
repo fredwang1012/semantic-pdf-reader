@@ -101,3 +101,43 @@ def test_library_search_empty_library_and_validation(client):
     assert client.get("/api/search", params={"q": "x"}).json() == {"groups": []}
     assert client.get("/api/search", params={"q": ""}).status_code == 422
     assert client.get("/api/search", params={"q": "x", "k": 21}).status_code == 422
+
+
+def test_password_protected_upload_is_422(client):
+    import pymupdf
+
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), "secret text", fontsize=11)
+    data = doc.tobytes(encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="pw", owner_pw="pw")
+    doc.close()
+    r = _upload(client, data)
+    assert r.status_code == 422 and "password-protected" in r.json()["detail"]
+
+
+def test_search_of_a_missing_document_is_404(client):
+    assert client.get("/api/docs/0123456789abcdef/search", params={"q": "x"}).status_code == 404
+
+
+def test_search_reports_mode_per_group(client, sample_pdf):
+    _upload(client, sample_pdf)
+    groups = client.get("/api/search", params={"q": "Calvin cycle"}).json()["groups"]
+    assert groups and groups[0]["mode"] == "bm25"
+
+
+def test_docs_still_served_when_the_embedder_cannot_load(client, monkeypatch):
+    from app import embedder, main
+    monkeypatch.setattr(main, "_library", None)
+    monkeypatch.setattr(embedder.settings, "embed", "auto")
+    monkeypatch.setattr(embedder, "_loaded", None)
+    monkeypatch.setattr(embedder, "_failed", False)
+    calls = []
+
+    def boom():
+        calls.append(1)
+        raise OSError("offline")
+
+    monkeypatch.setattr(embedder, "E5Embedder", boom)
+    assert client.get("/api/docs").status_code == 200
+    assert client.get("/api/health").json()["search"] == "bm25"
+    assert embedder.get_embedder() is None
+    assert len(calls) == 1

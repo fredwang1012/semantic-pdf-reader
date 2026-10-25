@@ -89,10 +89,10 @@ def test_a_fresh_library_on_the_same_root_still_searches(sample_pdf):
 def test_search_all_groups_by_document(lib):
     plants = lib.add(_two_pages("Photosynthesis lets plants turn sunlight into food."), "plants.pdf")
     rockets = lib.add(_two_pages("Plants and rockets.", "Rockets burn fuel to reach orbit."), "rockets.pdf")
-    assert [m.id for m, _ in lib.search_all("orbit")] == [rockets.id]
-    assert {m.id for m, _ in lib.search_all("plants")} == {plants.id, rockets.id}
+    assert [m.id for m, _, _ in lib.search_all("orbit")] == [rockets.id]
+    assert {m.id for m, _, _ in lib.search_all("plants")} == {plants.id, rockets.id}
     assert len(lib.search_all("plants", max_docs=1)) == 1
-    assert all(len(hits) <= 1 for _, hits in lib.search_all("plants", k_per_doc=1))
+    assert all(len(hits) <= 1 for _, hits, _ in lib.search_all("plants", k_per_doc=1))
     assert lib.search_all("zebra") == []
 
 
@@ -100,7 +100,7 @@ def test_search_all_orders_by_query_term_coverage(lib):
     full = lib.add(_two_pages("Rockets burn fuel to reach orbit."), "full.pdf")
     time.sleep(0.01)  # the partial match is newer, so list order alone would put it first
     partial = lib.add(_two_pages("Rockets are loud."), "partial.pdf")
-    assert [m.id for m, _ in lib.search_all("rockets orbit")] == [full.id, partial.id]
+    assert [m.id for m, _, _ in lib.search_all("rockets orbit")] == [full.id, partial.id]
 
 
 def test_search_all_skips_a_document_deleted_mid_search(lib, monkeypatch):
@@ -114,8 +114,55 @@ def test_search_all_skips_a_document_deleted_mid_search(lib, monkeypatch):
         return real(id_)
 
     monkeypatch.setattr(lib, "index", flaky)
-    assert [m.id for m, _ in lib.search_all("rockets")] == [b.id]
+    assert [m.id for m, _, _ in lib.search_all("rockets")] == [b.id]
 
 
 def test_search_all_on_an_empty_library(lib):
     assert lib.search_all("anything") == []
+
+
+def test_concurrent_adds_of_the_same_pdf_leave_one_complete_folder(lib):
+    import threading
+
+    class SlowEmbedder(FakeEmbedder):
+        def embed_passages(self, texts):
+            time.sleep(0.2)
+            return super().embed_passages(texts)
+
+    lib.embedder = SlowEmbedder()
+    data = _two_pages("Plants make food from light.")
+    results, errors = [], []
+
+    def work():
+        try:
+            results.append(lib.add(data, "a.pdf"))
+        except Exception as e:  # noqa: BLE001 - reported below
+            errors.append(e)
+
+    threads = [threading.Thread(target=work) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert len({m.id for m in results}) == 1 and len(results) == 2
+    folders = list(lib.root.iterdir())
+    assert [f.name for f in folders] == [results[0].id]
+    assert {p.name for p in folders[0].iterdir()} >= {"meta.json", "chunks.json", "doc.pdf"}
+
+
+def test_add_discards_its_temp_folder_when_the_final_one_appears_first(lib, monkeypatch):
+    data = _two_pages("Plants make food from light.")
+    first = Library(lib.root).add(data, "a.pdf")
+    real_get = Library.get
+    calls = {"n": 0}
+
+    def blind_get(self, id_):  # the first check misses, as if another process had not finished yet
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise KeyError(id_)
+        return real_get(self, id_)
+
+    monkeypatch.setattr(Library, "get", blind_get)
+    assert lib.add(data, "b.pdf").id == first.id
+    assert [f.name for f in lib.root.iterdir()] == [first.id]
