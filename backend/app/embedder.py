@@ -1,5 +1,6 @@
 """multilingual-e5-small query/passage embeddings. Imported lazily; search falls back to BM25 if unavailable."""
 import logging
+import threading
 
 import numpy as np
 
@@ -23,18 +24,24 @@ class E5Embedder:
 
 _loaded: E5Embedder | None = None
 _failed = False
+_lock = threading.Lock()
 
 
 def get_embedder() -> E5Embedder | None:
-    """The shared embedder, loaded on first use; None when embeddings are off or sentence-transformers is missing."""
+    """The shared embedder, loaded on first use; None when embeddings are off or the model cannot be loaded."""
     global _loaded, _failed
-    if settings.embed == "off" or _failed:
+    if settings.embed == "off":
         return None
-    if _loaded is None:
-        try:
-            _loaded = E5Embedder()
-        except ImportError:
-            log.info("sentence-transformers not installed (uv sync --extra embed): BM25-only search")
-            _failed = True
+    with _lock:
+        if _failed:
             return None
-    return _loaded
+        if _loaded is None:
+            try:
+                _loaded = E5Embedder()
+            except ImportError:
+                log.info("sentence-transformers not installed (uv sync --extra embed): BM25-only search")
+                _failed = True
+            except Exception as e:  # e.g. the model cannot be downloaded offline
+                log.warning("could not load %s (%s): BM25-only search", MODEL_NAME, e)
+                _failed = True
+        return _loaded

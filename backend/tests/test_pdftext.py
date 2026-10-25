@@ -42,3 +42,17 @@ def test_extract_accepts_a_path(tmp_path, sample_pdf):
     path.write_bytes(sample_pdf)
     blocks, sizes = extract(str(path))
     assert blocks and len(sizes) == 2
+
+
+def test_password_protected_pdf_is_rejected():
+    import pymupdf
+    import pytest
+
+    from app.pdftext import PasswordProtected
+
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), "secret text", fontsize=11)
+    data = doc.tobytes(encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="pw", owner_pw="pw")
+    doc.close()
+    with pytest.raises(PasswordProtected, match="password-protected"):
+        extract(data)
