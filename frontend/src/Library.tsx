@@ -1,9 +1,10 @@
-/** Sidebar listing the stored PDFs: select, upload (button or drop) and delete with an inline confirm. */
-import { useRef, useState } from "react";
+/** Sidebar listing the stored PDFs: select, upload (button or dropping a PDF anywhere on the page) and delete with an inline confirm. */
+import { useEffect, useRef, useState } from "react";
 import { ApiError, deleteDoc, uploadDoc, type DocMeta } from "./api";
 
 interface Props {
   docs: DocMeta[];
+  loading: boolean;
   currentId: string | null;
   onSelect: (id: string) => void;
   onUploaded: (doc: DocMeta) => void;
@@ -12,14 +13,16 @@ interface Props {
 
 const message = (e: unknown) => (e instanceof ApiError ? e.message : "Something went wrong");
 
-export default function Library({ docs, currentId, onSelect, onUploaded, onDeleted }: Props) {
+export default function Library({ docs, loading, currentId, onSelect, onUploaded, onDeleted }: Props) {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const busy = useRef(false);
 
   async function upload(file: File) {
+    busy.current = true;
     setError(null);
     setStatus(`Uploading ${file.name}…`);
     try {
@@ -27,6 +30,7 @@ export default function Library({ docs, currentId, onSelect, onUploaded, onDelet
     } catch (e) {
       setError(message(e));
     } finally {
+      busy.current = false;
       setStatus(null);
     }
   }
@@ -42,24 +46,51 @@ export default function Library({ docs, currentId, onSelect, onUploaded, onDelet
     }
   }
 
-  function drop(e: React.DragEvent) {
-    e.preventDefault();
-    setDragging(false);
-    if (status !== null) return;
-    const file = [...e.dataTransfer.files].find((f) => f.name.toLowerCase().endsWith(".pdf"));
-    if (file) void upload(file);
-    else setError("Drop a PDF file");
-  }
+  // A PDF dropped anywhere on the page is uploaded; otherwise the browser would navigate away to the file.
+  const uploadRef = useRef(upload);
+  uploadRef.current = upload;
+  useEffect(() => {
+    let depth = 0; // dragenter/dragleave fire for every child element, so count them
+    const hasFiles = (e: DragEvent) => e.dataTransfer?.types.includes("Files") ?? false;
+    const onEnter = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth++;
+      setDragging(true);
+    };
+    const onOver = (e: DragEvent) => {
+      if (hasFiles(e)) e.preventDefault();
+    };
+    const onLeave = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setDragging(false);
+    };
+    const onDrop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth = 0;
+      setDragging(false);
+      if (busy.current) return;
+      const file = [...(e.dataTransfer?.files ?? [])].find((f) => f.name.toLowerCase().endsWith(".pdf"));
+      if (file) void uploadRef.current(file);
+      else setError("Drop a PDF file");
+    };
+    window.addEventListener("dragenter", onEnter);
+    window.addEventListener("dragover", onOver);
+    window.addEventListener("dragleave", onLeave);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragenter", onEnter);
+      window.removeEventListener("dragover", onOver);
+      window.removeEventListener("dragleave", onLeave);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, []);
 
   return (
     <aside
       className={`flex w-64 shrink-0 flex-col border-r border-[var(--ground-edge)] ${dragging ? "bg-[var(--ground-edge)]" : ""}`}
-      onDragOver={(e) => {
-        e.preventDefault();
-        setDragging(true);
-      }}
-      onDragLeave={() => setDragging(false)}
-      onDrop={drop}
     >
       <div className="p-3">
         <button
@@ -89,7 +120,7 @@ export default function Library({ docs, currentId, onSelect, onUploaded, onDelet
         )}
       </div>
       <ul className="min-h-0 flex-1 overflow-y-auto">
-        {docs.length === 0 && (
+        {!loading && docs.length === 0 && (
           <li className="px-3 text-sm text-[var(--ink-soft)]">Drop a PDF here to add it</li>
         )}
         {docs.map((d) => (

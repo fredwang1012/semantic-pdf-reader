@@ -14,11 +14,12 @@ Everything runs locally; nothing leaves your machine.
 
 ## Quick start
 
-Prerequisites: Python 3.12 with [uv](https://docs.astral.sh/uv/), and Node 20+.
+Prerequisites: Python 3.12 with [uv](https://docs.astral.sh/uv/), and Node 20.19+ or 22.12+ (Vite 8 requirement).
 
 ```bash
 cd backend && py -3.12 -m uv sync       # or plain: uv sync
 # optional, for hybrid search (a large PyTorch download): py -3.12 -m uv sync --extra embed
+# the first run then also downloads the embedding model (about 470 MB)
 cd ../frontend && npm install && npm run build
 cd ../backend && py -3.12 -m uv run uvicorn app.main:app --port 8000
 ```
