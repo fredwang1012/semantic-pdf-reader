@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from app.config import settings
@@ -6,7 +8,7 @@ from app.library import Library, NoTextLayer
 from .conftest import FakeEmbedder, make_pdf
 
 
-# Each page is padded past the chunk minimum so it becomes its own chunk (a one-chunk document scores 0 everywhere).
+# Each page is padded past the chunk minimum so it becomes its own chunk.
 def _two_pages(first: str, second: str = "Nothing relevant here.") -> bytes:
     pad = " The quick brown fox jumps over the lazy dog while the committee reviews the quarterly budget at length again and again." * 2
     return make_pdf([[first + pad], [second + pad]])
@@ -84,19 +86,35 @@ def test_a_fresh_library_on_the_same_root_still_searches(sample_pdf):
     assert index.search("Adam optimizer")[0].chunk.page == 2
 
 
-def test_search_all_groups_by_document_best_first(lib):
+def test_search_all_groups_by_document(lib):
     plants = lib.add(_two_pages("Photosynthesis lets plants turn sunlight into food."), "plants.pdf")
-    both = lib.add(_two_pages("Plants and rockets.", "Rockets burn fuel to reach orbit."),
-                   "rockets.pdf")
-    only_rockets = lib.search_all("orbit")
-    assert [m.id for m, _ in only_rockets] == [both.id]
-    groups = lib.search_all("plants")
-    assert {m.id for m, _ in groups} == {plants.id, both.id}
-    scores = [hits[0].score for _, hits in groups]
-    assert scores == sorted(scores, reverse=True)
-    assert lib.search_all("plants", max_docs=1)[0][0].id == groups[0][0].id
+    rockets = lib.add(_two_pages("Plants and rockets.", "Rockets burn fuel to reach orbit."), "rockets.pdf")
+    assert [m.id for m, _ in lib.search_all("orbit")] == [rockets.id]
+    assert {m.id for m, _ in lib.search_all("plants")} == {plants.id, rockets.id}
+    assert len(lib.search_all("plants", max_docs=1)) == 1
     assert all(len(hits) <= 1 for _, hits in lib.search_all("plants", k_per_doc=1))
     assert lib.search_all("zebra") == []
+
+
+def test_search_all_orders_by_query_term_coverage(lib):
+    full = lib.add(_two_pages("Rockets burn fuel to reach orbit."), "full.pdf")
+    time.sleep(0.01)  # the partial match is newer, so list order alone would put it first
+    partial = lib.add(_two_pages("Rockets are loud."), "partial.pdf")
+    assert [m.id for m, _ in lib.search_all("rockets orbit")] == [full.id, partial.id]
+
+
+def test_search_all_skips_a_document_deleted_mid_search(lib, monkeypatch):
+    a = lib.add(_two_pages("Rockets burn fuel."), "a.pdf")
+    b = lib.add(_two_pages("Rockets reach orbit."), "b.pdf")
+    real = lib.index
+
+    def flaky(id_):
+        if id_ == a.id:
+            raise KeyError(id_)
+        return real(id_)
+
+    monkeypatch.setattr(lib, "index", flaky)
+    assert [m.id for m, _ in lib.search_all("rockets")] == [b.id]
 
 
 def test_search_all_on_an_empty_library(lib):

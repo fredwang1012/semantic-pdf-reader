@@ -1,3 +1,5 @@
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -6,7 +8,7 @@ from app.main import app
 from .conftest import make_pdf
 
 
-# Each page is padded past the chunk minimum so it becomes its own chunk (a one-chunk document scores 0 everywhere).
+# Each page is padded past the chunk minimum so it becomes its own chunk.
 def _two_pages(first: str, second: str = "Nothing relevant here.") -> bytes:
     pad = " The quick brown fox jumps over the lazy dog while the committee reviews the quarterly budget at length again and again." * 2
     return make_pdf([[first + pad], [second + pad]])
@@ -85,8 +87,14 @@ def test_library_search_groups_results_by_document(client):
     assert groups[0]["mode"] == "bm25" and len(groups[0]["results"][0]["rects"][0]) == 5
     both = client.get("/api/search", params={"q": "plants"}).json()["groups"]
     assert {g["doc"]["id"] for g in both} == {first["id"], second["id"]}
-    scores = [g["results"][0]["score"] for g in both]
-    assert scores == sorted(scores, reverse=True)
+
+
+def test_library_search_ranks_fuller_matches_first(client):
+    full = _upload(client, _two_pages("Rockets burn fuel to reach orbit."), "full.pdf").json()
+    time.sleep(0.01)
+    partial = _upload(client, _two_pages("Rockets are loud."), "partial.pdf").json()
+    groups = client.get("/api/search", params={"q": "rockets orbit"}).json()["groups"]
+    assert [g["doc"]["id"] for g in groups] == [full["id"], partial["id"]]
 
 
 def test_library_search_empty_library_and_validation(client):

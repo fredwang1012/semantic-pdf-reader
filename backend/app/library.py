@@ -15,7 +15,7 @@ import numpy as np
 
 from .chunks import Chunk, make_chunks
 from .pdftext import extract, title_of
-from .retrieval import Embedder, Hit, Index
+from .retrieval import Embedder, Hit, Index, tokenize
 
 DOC_ID = re.compile(r"^[0-9a-f]{16}$")
 
@@ -128,13 +128,22 @@ class Library:
     def search_all(self, query: str, k_per_doc: int = 3, max_docs: int = 10) -> "list[tuple[DocMeta, list[Hit]]]":
         """Search every document; keep each one's top hits, drop those with none, best document first.
 
-        Documents are scored independently: hybrid and BM25-only scores both lie in [0, 1] but are not
-        calibrated across documents, so the ordering between documents is a rough guide only.
+        Documents are ordered by the best hit's query-term coverage (the fraction of distinct query words in its
+        text), then by its score. Scores alone cannot rank documents: they are in [0, 1] in both hybrid and
+        BM25-only mode but are normalised per document, so not calibrated across documents.
         """
+        terms = set(tokenize(query))
+
+        def coverage(hit: Hit) -> float:
+            return len(terms & set(tokenize(hit.chunk.text))) / len(terms) if terms else 0.0
+
         groups = []
         for meta in self.list():
-            hits = self.index(meta.id).search(query, k_per_doc)
+            try:
+                hits = self.index(meta.id).search(query, k_per_doc)
+            except KeyError:  # deleted since list()
+                continue
             if hits:
                 groups.append((meta, hits))
-        groups.sort(key=lambda g: g[1][0].score, reverse=True)
+        groups.sort(key=lambda g: (coverage(g[1][0]), g[1][0].score), reverse=True)
         return groups[:max_docs]

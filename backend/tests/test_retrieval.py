@@ -2,6 +2,7 @@ import pytest
 
 from app.chunks import make_chunks
 from app.pdftext import extract
+from app.chunks import Chunk
 from app.retrieval import Index
 
 from .conftest import FakeEmbedder
@@ -57,3 +58,22 @@ def test_mismatched_embeddings_fall_back_to_bm25(chunks):
 
 def test_empty_index_searches_to_nothing():
     assert Index([]).search("anything") == []
+
+
+def _chunk(i, text):
+    return Chunk(id=f"c{i}", page=1, text=text, rects=[[1, 0, 0, 10, 10]])
+
+
+def test_bm25_single_chunk_document_matches_its_own_word():
+    hits = Index([_chunk(0, "Rockets burn fuel.")]).search("rockets")
+    assert len(hits) == 1 and hits[0].score == 1.0
+
+
+def test_bm25_chunks_that_all_contain_the_term_all_match():
+    index = Index([_chunk(0, "rockets burn fuel"), _chunk(1, "rockets reach orbit")])
+    assert len(index.search("rockets")) == 2
+
+
+def test_bm25_query_matching_no_word_returns_nothing():
+    index = Index([_chunk(0, "rockets burn fuel"), _chunk(1, "plants need light")])
+    assert index.search("zebra") == []
