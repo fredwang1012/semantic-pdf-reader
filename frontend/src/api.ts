@@ -1,6 +1,9 @@
 /** Typed client for the backend's /api routes. */
 
-/** [page, x0, y0, x1, y1]: page is 1-based, coordinates are PDF points from the top-left. */
+/**
+ * [page, x0, y0, x1, y1]: page is 1-based, coordinates are PDF points from the top-left of the page as displayed
+ * (after its /Rotate), the space of pdf.js's viewport at scale 1.
+ */
 export type Rect = [number, number, number, number, number];
 
 export interface DocMeta {
