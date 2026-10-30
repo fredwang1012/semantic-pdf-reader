@@ -1,5 +1,7 @@
-"""FastAPI app: upload PDFs, list the library, serve the PDF bytes, and search a document."""
+"""FastAPI app: upload PDFs, list the library, serve the PDF bytes, and search one document or the whole library."""
 import asyncio
+import mimetypes
+import threading
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, UploadFile
@@ -10,20 +12,23 @@ from fastapi.staticfiles import StaticFiles
 from .config import ROOT, settings
 from .embedder import get_embedder
 from .library import Library, NoTextLayer
-from .retrieval import DEFAULT_K
+from .pdftext import PasswordProtected
+from .retrieval import DEFAULT_K, Hit
 
 app = FastAPI(title="Semantic PDF Reader")
 app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
                    allow_methods=["*"], allow_headers=["*"])
 
 _library: Library | None = None
+_library_lock = threading.Lock()
 
 
 def library() -> Library:
     global _library
-    if _library is None:
-        _library = Library(settings.docs_dir, get_embedder())
-    return _library
+    with _library_lock:
+        if _library is None:
+            _library = Library(settings.docs_dir, get_embedder())
+        return _library
 
 
 def _meta_or_404(id_: str):
@@ -52,7 +57,7 @@ async def upload(file: UploadFile):
         raise HTTPException(400, "not a PDF file")
     try:
         meta = await asyncio.to_thread(library().add, data, file.filename or "document.pdf")
-    except NoTextLayer as e:
+    except (NoTextLayer, PasswordProtected) as e:
         raise HTTPException(422, str(e)) from None
     except RuntimeError as e:  # PyMuPDF raises on a damaged file
         raise HTTPException(400, f"could not read the PDF: {e}") from None
@@ -76,13 +81,32 @@ def delete_doc(doc_id: str):
     library().delete(doc_id)
 
 
+def _results(hits: list[Hit]) -> list[dict]:
+    return [{**h.chunk.to_json(), "score": round(h.score, 4)} for h in hits]
+
+
+@app.get("/api/search")
+async def search_all(q: str = Query(min_length=1, max_length=500), k: int = Query(3, ge=1, le=20)):
+    groups = await asyncio.to_thread(library().search_all, q, k)
+    return {"groups": [{"doc": meta.to_json(), "mode": mode, "results": _results(hits)}
+                       for meta, hits, mode in groups]}
+
+
 @app.get("/api/docs/{doc_id}/search")
 async def search(doc_id: str, q: str = Query(min_length=1, max_length=500), k: int = Query(DEFAULT_K, ge=1, le=50)):
-    _meta_or_404(doc_id)
-    index = library().index(doc_id)
-    hits = await asyncio.to_thread(index.search, q, k)
-    return {"mode": index.mode, "results": [{**h.chunk.to_json(), "score": round(h.score, 4)} for h in hits]}
+    def run():
+        index = library().index(doc_id)
+        return index.mode, index.search(q, k)
 
+    try:
+        mode, hits = await asyncio.to_thread(run)
+    except KeyError:  # unknown id, or deleted while searching
+        raise HTTPException(404, "no such document") from None
+    return {"mode": mode, "results": _results(hits)}
+
+
+# Windows maps .mjs to text/plain in the registry, and browsers refuse to run the pdf.js worker module under that type.
+mimetypes.add_type("text/javascript", ".mjs")
 
 _dist = ROOT / "frontend" / "dist"
 if (_dist / "index.html").is_file():
