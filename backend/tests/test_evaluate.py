@@ -112,7 +112,9 @@ def test_rerank_retrievers_run_with_injected_models(tmp_path, capsys, monkeypatc
     assert [r.split("|")[1].strip() for r in rows] == ["bm25", "hybrid", "bm25+rerank", "hybrid+rerank"]
     ranks = {r["retriever"]: [q["rank"] for q in r["ranks"]] for r in json.loads(out.read_text(encoding="utf-8"))}
     assert ranks["bm25"] == [1, 1]
-    assert ranks["bm25+rerank"] == ranks["hybrid+rerank"] == [2, 1]
+    assert ranks["hybrid+rerank"] == [2, 1]
+    # the page 2 chunk shares only stopwords with question 1, so BM25-only search never offers it to the reranker
+    assert ranks["bm25+rerank"] == [1, 1]
 
 
 def test_hybrid_rerank_needs_the_embedder_too(tmp_path, capsys, monkeypatch):
