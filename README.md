@@ -4,6 +4,8 @@ A PDF reader where you search by meaning instead of exact words. Upload a PDF, t
 to the page that answers it and highlights the passage. Search runs inside one document or across your whole library.
 Everything runs locally; nothing leaves your machine.
 
+![The reader with a question in the search box, three results in the sidebar, and the matching passage highlighted on the PDF page](docs/screenshot.png)
+
 ## Features
 
 - **Jump to the passage.** A result opens the page and draws a highlight over the matching lines in the pdf.js view.
