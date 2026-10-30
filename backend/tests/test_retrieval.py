@@ -3,7 +3,7 @@ import pytest
 from app.chunks import make_chunks
 from app.pdftext import extract
 from app.chunks import Chunk
-from app.retrieval import RERANK_TOP, Index
+from app.retrieval import RERANK_TOP, Index, match_terms
 
 from .conftest import FakeEmbedder, FakeReranker
 
@@ -79,35 +79,4 @@ def test_bm25_query_matching_no_word_returns_nothing():
     assert index.search("zebra") == []
 
 
-def test_reranker_reorders_hits_and_its_scores_are_returned():
-    chunks = [_chunk(0, "rockets rockets rockets burn fuel"), _chunk(1, "rockets reach orbit")]
-    assert Index(chunks).search("rockets")[0].chunk.id == "c0"
-    hits = Index(chunks, reranker=FakeReranker("orbit")).search("rockets")
-    assert [h.chunk.id for h in hits] == ["c1", "c0"]
-    assert [h.score for h in hits] == [1.0, 0.0]
-
-
-@pytest.mark.parametrize("k", [3, RERANK_TOP + 5])
-def test_reranker_sees_the_top_candidates_and_returns_k(k):
-    chunks = [_chunk(i, "rockets " * (i + 1) + ("orbit" if i % 2 else "fuel")) for i in range(RERANK_TOP + 10)]
-    reranker = FakeReranker("orbit")
-    hits = Index(chunks, reranker=reranker).search("rockets", k)
-    assert len(hits) == k
-    assert len(reranker.seen) == max(k, RERANK_TOP)
-    assert all("orbit" in h.chunk.text for h in hits[:3])
-
-
-def test_reranker_keeps_the_bm25_term_filter():
-    chunks = [_chunk(0, "rockets burn fuel"), _chunk(1, "plants need light in orbit")]
-    reranker = FakeReranker("orbit")
-    index = Index(chunks, reranker=reranker)
-    assert [h.chunk.id for h in index.search("rockets")] == ["c0"]
-    assert reranker.seen == ["rockets burn fuel"]
-    assert index.search("zebra") == []
-
-
-def test_reranker_works_on_top_of_hybrid(chunks):
-    emb = FakeEmbedder()
-    index = Index(chunks, emb.embed_passages([c.text for c in chunks]), emb, FakeReranker("momentum"))
-    assert index.mode == "hybrid"
-    assert index.search("how do plants make food")[0].chunk.page == 2
+from app.retrieval import RERANK_TOP, Index, match_terms

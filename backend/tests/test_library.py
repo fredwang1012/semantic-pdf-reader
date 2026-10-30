@@ -114,6 +114,13 @@ def test_search_all_breaks_coverage_ties_by_reranker_score():
     assert [hits[0].score for _, hits, _ in groups] == [1.0, 0.0]
 
 
+def test_search_all_coverage_ignores_stopwords(lib):
+    full = lib.add(_two_pages("Rockets burn fuel to reach orbit."), "full.pdf")
+    time.sleep(0.01)  # newer, and it shares more words with the query, but only stopwords
+    wordy = lib.add(_two_pages("What is the use of rockets in the sky?"), "wordy.pdf")
+    assert [m.id for m, _, _ in lib.search_all("what is the orbit of the rockets")] == [full.id, wordy.id]
+
+
 def test_search_all_skips_a_document_deleted_mid_search(lib, monkeypatch):
     a = lib.add(_two_pages("Rockets burn fuel."), "a.pdf")
     b = lib.add(_two_pages("Rockets reach orbit."), "b.pdf")
