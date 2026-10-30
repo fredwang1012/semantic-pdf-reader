@@ -62,6 +62,49 @@ describe("highlightBoxes", () => {
   });
 });
 
+// Where a box in the unrotated 612 x 792 page is displayed once /Rotate turns the page clockwise: the space the
+// backend reports rects in.
+function turn([x0, y0, x1, y1]: number[], rotation: number, w = 612, h = 792): number[] {
+  if (rotation === 90) return [h - y1, x0, h - y0, x1];
+  if (rotation === 180) return [w - x1, h - y1, w - x0, h - y0];
+  if (rotation === 270) return [y0, w - x1, y1, w - x0];
+  return [x0, y0, x1, y1];
+}
+
+describe("highlightBoxes on rotated pages", () => {
+  // Two lines of one passage, 2pt apart, in the unrotated page.
+  const lines = [
+    [72, 100, 400, 114],
+    [72, 116, 300, 130],
+  ];
+
+  it.each([0, 90, 180, 270])("scales each line of a page rotated by %i into place, unmerged", (rotation) => {
+    const rects = lines.map((l) => [1, ...turn(l, rotation)] as Rect);
+    expect(highlightBoxes(rects, 1, 1.5)).toEqual(
+      rects.map(([, x0, y0, x1, y1]) => ({
+        left: x0 * 1.5 - 2,
+        top: y0 * 1.5 - 2,
+        width: (x1 - x0) * 1.5 + 4,
+        height: (y1 - y0) * 1.5 + 4,
+      })),
+    );
+  });
+
+  it("puts a line of a page rotated by 90 at the right edge, running down", () => {
+    const [box] = highlightBoxes([[1, ...turn(lines[0], 90)] as Rect], 1, 1);
+    expect(box).toEqual({ left: 676, top: 70, width: 18, height: 332 });
+  });
+
+  it.each([90, 270])("merges two pieces of one line on a page rotated by %i", (rotation) => {
+    const pieces = [
+      [72, 100, 200, 114],
+      [203, 100, 400, 114],
+    ];
+    const boxes = highlightBoxes(pieces.map((l) => [1, ...turn(l, rotation)] as Rect), 1, 1);
+    expect(boxes).toEqual(highlightBoxes([[1, ...turn([72, 100, 400, 114], rotation)] as Rect], 1, 1));
+  });
+});
+
 describe("firstRect", () => {
   it("picks the lowest page, then the lowest y0", () => {
     const rects: Rect[] = [
