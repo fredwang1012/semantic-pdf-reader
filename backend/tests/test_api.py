@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-from .conftest import make_pdf
+from .conftest import FakeReranker, make_pdf
 
 
 # Each page is padded past the chunk minimum so it becomes its own chunk.
@@ -45,7 +45,16 @@ def test_search_returns_the_right_page_first(client, sample_pdf):
 
 
 def test_health_reports_bm25_without_embeddings(client):
-    assert client.get("/api/health").json() == {"ok": True, "search": "bm25"}
+    assert client.get("/api/health").json() == {"ok": True, "search": "bm25", "rerank": False}
+
+
+def test_health_reports_an_active_reranker(client, monkeypatch):
+    from app import main
+    monkeypatch.setattr(main, "get_reranker", lambda: FakeReranker("orbit"))
+    assert client.get("/api/health").json() == {"ok": True, "search": "bm25", "rerank": True}
+    id_ = _upload(client, _two_pages("Rockets burn fuel.", "Rockets reach orbit.")).json()["id"]
+    results = client.get(f"/api/docs/{id_}/search", params={"q": "rockets"}).json()["results"]
+    assert [r["page"] for r in results] == [2, 1]
 
 
 def test_upload_rejects_non_pdf_and_text_less_pdf(client):

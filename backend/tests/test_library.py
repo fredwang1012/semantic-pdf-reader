@@ -5,7 +5,7 @@ import pytest
 from app.config import settings
 from app.library import Library, NoTextLayer
 
-from .conftest import FakeEmbedder, make_pdf
+from .conftest import FakeEmbedder, FakeReranker, make_pdf
 
 
 # Each page is padded past the chunk minimum so it becomes its own chunk.
@@ -101,6 +101,17 @@ def test_search_all_orders_by_query_term_coverage(lib):
     time.sleep(0.01)  # the partial match is newer, so list order alone would put it first
     partial = lib.add(_two_pages("Rockets are loud."), "partial.pdf")
     assert [m.id for m, _, _ in lib.search_all("rockets orbit")] == [full.id, partial.id]
+
+
+def test_search_all_breaks_coverage_ties_by_reranker_score():
+    older = Library(settings.docs_dir).add(_two_pages("Rockets reach orbit."), "older.pdf")
+    time.sleep(0.01)
+    newer = Library(settings.docs_dir).add(_two_pages("Rockets burn fuel."), "newer.pdf")
+    # both top hits score 1.0 after per-document scaling, so without a reranker list order (newest first) decides
+    assert [m.id for m, _, _ in Library(settings.docs_dir).search_all("rockets")] == [newer.id, older.id]
+    groups = Library(settings.docs_dir, reranker=FakeReranker("orbit")).search_all("rockets")
+    assert [m.id for m, _, _ in groups] == [older.id, newer.id]
+    assert [hits[0].score for _, hits, _ in groups] == [1.0, 0.0]
 
 
 def test_search_all_skips_a_document_deleted_mid_search(lib, monkeypatch):

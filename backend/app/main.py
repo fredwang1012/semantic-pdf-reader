@@ -13,6 +13,7 @@ from .config import ROOT, settings
 from .embedder import get_embedder
 from .library import Library, NoTextLayer
 from .pdftext import PasswordProtected
+from .reranker import get_reranker
 from .retrieval import DEFAULT_K, Hit
 
 app = FastAPI(title="Semantic PDF Reader")
@@ -27,7 +28,7 @@ def library() -> Library:
     global _library
     with _library_lock:
         if _library is None:
-            _library = Library(settings.docs_dir, get_embedder())
+            _library = Library(settings.docs_dir, get_embedder(), get_reranker())
         return _library
 
 
@@ -40,7 +41,8 @@ def _meta_or_404(id_: str):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "search": "hybrid" if library().embedder is not None else "bm25"}
+    lib = library()
+    return {"ok": True, "search": "hybrid" if lib.embedder is not None else "bm25", "rerank": lib.reranker is not None}
 
 
 @app.get("/api/docs")
