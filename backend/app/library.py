@@ -18,7 +18,7 @@ import pymupdf
 
 from .chunks import Chunk, make_chunks
 from .pdftext import display_bbox, extract, title_of
-from .retrieval import Embedder, Hit, Index, tokenize
+from .retrieval import Embedder, Hit, Index, match_terms, tokenize
 
 DOC_ID = re.compile(r"^[0-9a-f]{16}$")
 # Version 1 stored line boxes in the unrotated page, which misplaced highlights on rotated pages; version 2 stores them
@@ -163,11 +163,11 @@ class Library:
         """Search every document; keep each one's top hits, drop those with none, best document first.
 
         Each group is (document, hits, mode of its index). Documents are ordered by the best hit's query-term coverage
-        (the fraction of distinct query words in its text), then by its score. Scores alone cannot rank documents:
+        (the fraction of the query's match terms, its non-stopwords, in its text), then by its score. Scores alone cannot rank documents:
         they are in [0, 1] in both hybrid and BM25-only mode but are normalised per document, so not calibrated
         across documents.
         """
-        terms = set(tokenize(query))
+        terms = match_terms(query)
 
         def coverage(hit: Hit) -> float:
             return len(terms & set(tokenize(hit.chunk.text))) / len(terms) if terms else 0.0
