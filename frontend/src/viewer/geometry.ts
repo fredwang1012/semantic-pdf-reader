@@ -12,8 +12,18 @@ const PAD = 2; // px of breathing room around each highlight
 const MERGE_GAP = 6; // px: neighbouring words on one line fuse into one box
 const PAGE_PADDING = 32; // px of horizontal padding reserved around a page
 
-/** Whether two boxes sit on one text line close enough to merge. */
+/** The box with x and y swapped. */
+function transpose(b: Box): Box {
+  return { left: b.top, top: b.left, width: b.height, height: b.width };
+}
+
+/**
+ * Whether two boxes sit on one text line close enough to merge. A line is longer than it is tall in the direction it
+ * is read, so two boxes taller than wide are lines running down a page rotated by 90 or 270 degrees: they are compared
+ * with x and y swapped, or neighbouring lines would merge into one block.
+ */
 function mergeable(a: Box, b: Box): boolean {
+  if (a.height > a.width && b.height > b.width) return mergeable(transpose(a), transpose(b));
   const overlap = Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top);
   if (overlap < 0.5 * Math.min(a.height, b.height)) return false;
   const gap = Math.max(a.left, b.left) - Math.min(a.left + a.width, b.left + b.width);
@@ -31,7 +41,10 @@ function union(a: Box, b: Box): Box {
   };
 }
 
-/** CSS-pixel highlight boxes for one page: scaled, same-line neighbours merged, then padded. */
+/**
+ * CSS-pixel highlight boxes for one page: scaled, same-line neighbours merged, then padded. The rects are already in
+ * the page as displayed, after its /Rotate (see backend/app/pdftext.py), so scaling is the whole mapping.
+ */
 export function highlightBoxes(rects: Rect[], page: number, scale: number): Box[] {
   let boxes: Box[] = rects
     .filter((r) => r[0] === page)

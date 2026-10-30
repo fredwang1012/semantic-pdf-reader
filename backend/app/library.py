@@ -14,12 +14,16 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
+import pymupdf
 
 from .chunks import Chunk, make_chunks
-from .pdftext import extract, title_of
+from .pdftext import display_bbox, extract, title_of
 from .retrieval import Embedder, Hit, Index, match_terms, tokenize
 
 DOC_ID = re.compile(r"^[0-9a-f]{16}$")
+# Version 1 stored line boxes in the unrotated page, which misplaced highlights on rotated pages; version 2 stores them
+# in the displayed page (see pdftext). Version 1 boxes are rotated when the index loads, so old folders need no rebuild.
+INDEX_VERSION = 2
 
 
 class NoTextLayer(ValueError):
@@ -36,6 +40,7 @@ class DocMeta:
     page_sizes: list[list[float]]   # [width, height] per page, in points
     embedded: bool
     added: float
+    index_version: int = 1          # absent from meta.json files written before INDEX_VERSION 2
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -43,6 +48,14 @@ class DocMeta:
 
 def doc_id(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()[:16]
+
+
+def _rotate_v1_rects(chunks: list[Chunk], pdf: Path) -> None:
+    """Turn a version 1 index's boxes, which are in the unrotated page, into the displayed page, in place."""
+    with pymupdf.open(pdf) as doc:
+        rotations = [page.rotation_matrix for page in doc]
+    for chunk in chunks:
+        chunk.rects = [[r[0], *display_bbox(r[1:], rotations[r[0] - 1])] for r in chunk.rects]
 
 
 class Library:
@@ -105,7 +118,7 @@ class Library:
         stem = Path(filename).stem or "Untitled"
         meta = DocMeta(id=id_, title=title_of(data, stem), filename=Path(filename).name, pages=len(sizes),
                        chunks=len(chunks), page_sizes=[[s.width, s.height] for s in sizes],
-                       embedded=embeddings is not None, added=time.time())
+                       embedded=embeddings is not None, added=time.time(), index_version=INDEX_VERSION)
         # write into a temp folder and rename, so a crash never leaves a half-written doc that list() would show
         final = self._dir(id_)
         self.root.mkdir(parents=True, exist_ok=True)
@@ -139,6 +152,8 @@ class Library:
             if not (d / "chunks.json").is_file():
                 raise KeyError(id_)
             chunks = [Chunk(**c) for c in json.loads((d / "chunks.json").read_text(encoding="utf-8"))]
+            if self.get(id_).index_version < 2:
+                _rotate_v1_rects(chunks, d / "doc.pdf")
             emb_path = d / "embeddings.npy"
             emb = np.load(emb_path) if emb_path.is_file() else None
             self._indexes[id_] = Index(chunks, emb, self.embedder)

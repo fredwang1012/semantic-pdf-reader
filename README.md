@@ -44,8 +44,9 @@ running as `hybrid` or `bm25`.
 3. **Index.** Each chunk is scored with BM25Plus, scaled by the document's highest score. In hybrid mode each chunk
    also gets a cosine similarity against the query embedding, added with weight 0.6. Without embeddings, a chunk must
    share at least one query word that is not a stopword (such as "the") to count as a hit.
-4. **Highlights.** A hit carries `[page, x0, y0, x1, y1]` rectangles in PDF points. The viewer scales them by the page
-   zoom and draws them over the pdf.js canvas.
+4. **Highlights.** A hit carries `[page, x0, y0, x1, y1]` rectangles in PDF points, measured on the page as displayed
+   (after its `/Rotate`, from the top-left of its CropBox). The viewer scales them by the page zoom and draws them over
+   the pdf.js canvas.
 
 Each PDF is stored in its own folder under `data/docs/`, named by the file's hash, so uploading the same file twice
 reuses the existing entry. A library search ranks documents by how many query terms they cover, then by score.
@@ -76,7 +77,8 @@ push to `main` and every pull request.
 - No OCR. A PDF without a text layer is rejected.
 - Without the `embed` extra, search is keyword-based only.
 - Scores are not calibrated across documents, so library search ranks documents by query-term coverage first.
-- Rotated pages are not handled; highlights assume an unrotated page.
+- Highlights are upright boxes around each line, so text set at an angle other than a multiple of 90 degrees gets a
+  box around its whole slant.
 
 ## Roadmap
 
