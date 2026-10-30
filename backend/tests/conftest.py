@@ -22,7 +22,7 @@ PAGE_TEXTS = [
 ]
 
 
-def make_pdf(pages: list[list[str]] = PAGE_TEXTS, title: str = "") -> bytes:
+def make_pdf(pages: list[list[str]] = PAGE_TEXTS, title: str = "", rotation: int = 0) -> bytes:
     doc = pymupdf.open()
     for n, paras in enumerate(pages, start=1):
         page = doc.new_page(width=612, height=792)
@@ -32,6 +32,7 @@ def make_pdf(pages: list[list[str]] = PAGE_TEXTS, title: str = "") -> bytes:
             page.insert_textbox(box, para, fontsize=11)
             y += 140
         page.insert_text((300, 760), str(n), fontsize=9)  # a page number footer, which extraction drops
+        page.set_rotation(rotation)  # /Rotate only: the content stays where it was drawn in the unrotated page
     if title:
         doc.set_metadata({"title": title})
     data = doc.tobytes()

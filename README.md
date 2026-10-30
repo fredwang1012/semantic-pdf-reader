@@ -48,8 +48,9 @@ Settings come from the environment or a `.env` file at the repo root; see [.env.
    share at least one query word that is not a stopword (such as "the") to count as a hit.
 4. **Rerank (optional).** With `RERANK=auto`, the bge-reranker-v2-m3 cross-encoder re-scores the top 30 hits of step 3
    and results follow its scores. It only sees those hits, so the BM25 term rule still holds.
-5. **Highlights.** A hit carries `[page, x0, y0, x1, y1]` rectangles in PDF points. The viewer scales them by the page
-   zoom and draws them over the pdf.js canvas.
+5. **Highlights.** A hit carries `[page, x0, y0, x1, y1]` rectangles in PDF points, measured on the page as displayed
+   (after its `/Rotate`, from the top-left of its CropBox). The viewer scales them by the page zoom and draws them over
+   the pdf.js canvas.
 
 Each PDF is stored in its own folder under `data/docs/`, named by the file's hash, so uploading the same file twice
 reuses the existing entry. A library search ranks documents by how many query terms they cover, then by score. With
@@ -84,7 +85,8 @@ checks, plus lint, on every push to `main` and every pull request.
 - Without the `embed` extra, search is keyword-based only.
 - Scores are not calibrated across documents, so library search ranks documents by query-term coverage first.
 - Reranking scores up to 30 passages per document, so a library search with it slows down as the library grows.
-- Rotated pages are not handled; highlights assume an unrotated page.
+- Highlights are upright boxes around each line, so text set at an angle other than a multiple of 90 degrees gets a
+  box around its whole slant.
 
 ## Roadmap
 
