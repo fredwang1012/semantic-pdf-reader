@@ -57,11 +57,12 @@ describe("api client", () => {
     expect(raw).not.toContain("& baz");
   });
 
-  it("omits k when not given and unwraps library groups", async () => {
-    fetchMock.mockResolvedValue(json({ groups: [{ doc: { id: "a" }, mode: "hybrid", results: [] }] }));
-    const groups = await searchLibrary("x y");
+  it("omits k when not given and returns the library groups with the match terms", async () => {
+    fetchMock.mockResolvedValue(json({ terms: ["x", "y"], groups: [{ doc: { id: "a" }, mode: "hybrid", results: [] }] }));
+    const r = await searchLibrary("x y");
     expect(fetchMock.mock.calls[0][0]).toBe("/api/search?q=x+y");
-    expect(groups[0].doc.id).toBe("a");
+    expect(r.terms).toEqual(["x", "y"]);
+    expect(r.groups[0].doc.id).toBe("a");
   });
 
   it("turns an error with a string detail into an ApiError", async () => {

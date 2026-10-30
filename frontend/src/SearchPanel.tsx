@@ -25,6 +25,7 @@ interface Group {
 }
 interface Found {
   query: string;
+  terms: string[];
   mode: string;
   groups: Group[];
 }
@@ -83,19 +84,22 @@ export default function SearchPanel({ docs, loading, currentId, scope, onScope, 
     try {
       let groups: Group[];
       let mode: string;
+      let terms: string[];
       if (scope === "doc") {
         const r = await searchDoc(currentId!, q, 10);
         mode = r.mode;
+        terms = r.terms;
         groups = [{ doc: null, items: r.results.map((result) => ({ docId: currentId!, result })) }];
       } else {
         const r = await searchLibrary(q);
-        mode = r.some((g) => g.mode === "bm25") ? "bm25" : "hybrid";
-        groups = r
+        mode = r.groups.some((g) => g.mode === "bm25") ? "bm25" : "hybrid";
+        terms = r.terms;
+        groups = r.groups
           .filter((g) => g.results.length > 0)
           .map((g) => ({ doc: g.doc, items: g.results.map((result) => ({ docId: g.doc.id, result })) }));
       }
       if (id !== latest.current) return;
-      setFound({ query: q, mode, groups });
+      setFound({ query: q, terms, mode, groups });
       setSelected(0);
     } catch (e) {
       if (id === latest.current) {
@@ -205,7 +209,7 @@ export default function SearchPanel({ docs, loading, currentId, scope, onScope, 
                           >
                             <span className="text-xs text-[var(--ink-soft)]">Page {item.result.page}</span>
                             <span className="mt-0.5 block">
-                              {markTerms(snippet(item.result.text, 220), found.query).map((p, n) =>
+                              {markTerms(snippet(item.result.text, 220), found.terms.join(" ")).map((p, n) =>
                                 p.hit ? <strong key={n}>{p.text}</strong> : <span key={n}>{p.text}</span>,
                               )}
                             </span>

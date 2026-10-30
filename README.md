@@ -39,7 +39,7 @@ running as `hybrid` or `bm25`.
    characters, so a chunk has a page to jump to.
 3. **Index.** Each chunk is scored with BM25Plus, scaled by the document's highest score. In hybrid mode each chunk
    also gets a cosine similarity against the query embedding, added with weight 0.6. Without embeddings, a chunk must
-   share at least one query term to count as a hit.
+   share at least one query word that is not a stopword (such as "the") to count as a hit.
 4. **Highlights.** A hit carries `[page, x0, y0, x1, y1]` rectangles in PDF points. The viewer scales them by the page
    zoom and draws them over the pdf.js canvas.
 
