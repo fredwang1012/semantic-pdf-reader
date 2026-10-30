@@ -12,6 +12,10 @@ _PAGE_NUMBER = re.compile(r"^\s*(?:page\s+)?\d{1,4}(?:\s*(?:/|of)\s*\d{1,4})?\s*
 _HYPHEN_BREAK = re.compile(r"(\w)-$")
 
 
+class PasswordProtected(ValueError):
+    """The PDF is encrypted and needs a password."""
+
+
 @dataclass
 class Line:
     page: int                                  # 1-based, as pdf.js numbers pages
@@ -47,6 +51,8 @@ def join_lines(texts: list[str]) -> str:
             continue
         if out and _HYPHEN_BREAK.search(out) and t[0].islower():
             out = out[:-1] + t
+        elif out and _HYPHEN_BREAK.search(out) and t[0].isalnum():
+            out += t
         else:
             out = f"{out} {t}" if out else t
     return out
@@ -61,6 +67,8 @@ def extract(source: bytes | str) -> tuple[list[Block], list[PageSize]]:
     blocks: list[Block] = []
     sizes: list[PageSize] = []
     with doc:
+        if doc.needs_pass:
+            raise PasswordProtected("password-protected PDFs are not supported")
         for pno, page in enumerate(doc, start=1):
             rect = page.rect
             sizes.append(PageSize(width=rect.width, height=rect.height))

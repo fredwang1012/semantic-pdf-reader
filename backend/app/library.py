@@ -7,6 +7,8 @@ import json
 import os
 import re
 import shutil
+import tempfile
+import threading
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -15,7 +17,7 @@ import numpy as np
 
 from .chunks import Chunk, make_chunks
 from .pdftext import extract, title_of
-from .retrieval import Embedder, Index
+from .retrieval import Embedder, Hit, Index, tokenize
 
 DOC_ID = re.compile(r"^[0-9a-f]{16}$")
 
@@ -48,6 +50,8 @@ class Library:
         self.root = root
         self.embedder = embedder
         self._indexes: dict[str, Index] = {}
+        self._add_locks: dict[str, threading.Lock] = {}
+        self._locks_guard = threading.Lock()
 
     def _dir(self, id_: str) -> Path:
         if not DOC_ID.match(id_):
@@ -76,13 +80,21 @@ class Library:
             raise KeyError(id_)
         return path
 
+    def _add_lock(self, id_: str) -> threading.Lock:
+        with self._locks_guard:
+            return self._add_locks.setdefault(id_, threading.Lock())
+
     def add(self, data: bytes, filename: str) -> DocMeta:
         """Extract, chunk, embed and save a PDF; returns the existing entry if the same bytes were added before."""
         id_ = doc_id(data)
-        try:
-            return self.get(id_)
-        except KeyError:
-            pass
+        with self._add_lock(id_):  # concurrent uploads of the same bytes do the work once
+            try:
+                return self.get(id_)
+            except KeyError:
+                pass
+            return self._add(id_, data, filename)
+
+    def _add(self, id_: str, data: bytes, filename: str) -> DocMeta:
         blocks, sizes = extract(data)
         chunks = make_chunks(blocks)
         if not chunks:
@@ -96,15 +108,22 @@ class Library:
                        embedded=embeddings is not None, added=time.time())
         # write into a temp folder and rename, so a crash never leaves a half-written doc that list() would show
         final = self._dir(id_)
-        tmp = self.root / f".tmp-{id_}"
-        shutil.rmtree(tmp, ignore_errors=True)
-        tmp.mkdir(parents=True)
-        (tmp / "doc.pdf").write_bytes(data)
-        (tmp / "chunks.json").write_text(json.dumps([c.to_json() for c in chunks]), encoding="utf-8")
-        if embeddings is not None:
-            np.save(tmp / "embeddings.npy", embeddings)
-        (tmp / "meta.json").write_text(json.dumps(meta.to_json()), encoding="utf-8")
-        os.replace(tmp, final)
+        self.root.mkdir(parents=True, exist_ok=True)
+        tmp = Path(tempfile.mkdtemp(dir=self.root, prefix=".tmp-"))
+        try:
+            (tmp / "doc.pdf").write_bytes(data)
+            (tmp / "chunks.json").write_text(json.dumps([c.to_json() for c in chunks]), encoding="utf-8")
+            if embeddings is not None:
+                np.save(tmp / "embeddings.npy", embeddings)
+            (tmp / "meta.json").write_text(json.dumps(meta.to_json()), encoding="utf-8")
+            try:
+                os.replace(tmp, final)
+            except OSError:  # another process finished the same PDF first
+                if not (final / "meta.json").is_file():
+                    raise
+                return self.get(id_)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
         return meta
 
     def delete(self, id_: str) -> None:
@@ -124,3 +143,28 @@ class Library:
             emb = np.load(emb_path) if emb_path.is_file() else None
             self._indexes[id_] = Index(chunks, emb, self.embedder)
         return self._indexes[id_]
+
+    def search_all(self, query: str, k_per_doc: int = 3, max_docs: int = 10) -> "list[tuple[DocMeta, list[Hit], str]]":
+        """Search every document; keep each one's top hits, drop those with none, best document first.
+
+        Each group is (document, hits, mode of its index). Documents are ordered by the best hit's query-term coverage
+        (the fraction of distinct query words in its text), then by its score. Scores alone cannot rank documents:
+        they are in [0, 1] in both hybrid and BM25-only mode but are normalised per document, so not calibrated
+        across documents.
+        """
+        terms = set(tokenize(query))
+
+        def coverage(hit: Hit) -> float:
+            return len(terms & set(tokenize(hit.chunk.text))) / len(terms) if terms else 0.0
+
+        groups = []
+        for meta in self.list():
+            try:
+                index = self.index(meta.id)
+                hits = index.search(query, k_per_doc)
+            except KeyError:  # deleted since list()
+                continue
+            if hits:
+                groups.append((meta, hits, index.mode))
+        groups.sort(key=lambda g: (coverage(g[1][0]), g[1][0].score), reverse=True)
+        return groups[:max_docs]

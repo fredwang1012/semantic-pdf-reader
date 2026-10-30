@@ -26,3 +26,5 @@ package = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Starlette's TestClient warns that it prefers httpx2; the pinned httpx works, so keep the output clean.
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient` is deprecated"]
