@@ -19,8 +19,25 @@ RERANK_TOP = 30  # first-stage candidates the reranker sees
 _WORD = re.compile(r"\w+", re.UNICODE)
 
 
+# English function words. They still count towards BM25 (where idf already discounts them), but a chunk sharing only
+# these with the query is not a keyword match, and they are not marked or counted as covered query terms.
+STOPWORDS = frozenset("""
+a about after all also am an and any are as at be been before being but by can could did do does doing for from had
+has have having he her here hers him his how i if in into is it its just me more most my no nor not of off on once only
+or other our ours out over own same she should so some such than that the their theirs them then there these they
+this those through to too under until up very was we were what when where which while who whom why will with would you
+your yours
+""".split())
+
+
 def tokenize(text: str) -> list[str]:
     return _WORD.findall(text.lower())
+
+
+def match_terms(query: str) -> set[str]:
+    """The query words a chunk must share to be a keyword match: its non-stopwords, or all of them if that is none."""
+    words = set(tokenize(query))
+    return (words - STOPWORDS) or words
 
 
 class Embedder(Protocol):
@@ -80,7 +97,7 @@ class Index:
         order = np.argsort(-s, kind="stable")[:max(k, RERANK_TOP) if self.reranker else k]
         if self.mode == "bm25":
             # BM25Plus gives absent terms a constant positive score, so a score says nothing about a match
-            terms = set(tokenize(query))
+            terms = match_terms(query)
             order = [i for i in order if self._words[i] & terms]
         hits = [Hit(self.chunks[i], float(s[i])) for i in order]
         return self._rerank(query, hits, k) if self.reranker else hits

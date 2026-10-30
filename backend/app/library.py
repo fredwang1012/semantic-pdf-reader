@@ -17,7 +17,7 @@ import numpy as np
 
 from .chunks import Chunk, make_chunks
 from .pdftext import extract, title_of
-from .retrieval import Embedder, Hit, Index, Reranker, tokenize
+from .retrieval import Embedder, Hit, Index, Reranker, match_terms, tokenize
 
 DOC_ID = re.compile(r"^[0-9a-f]{16}$")
 
@@ -149,15 +149,15 @@ class Library:
         """Search every document; keep each one's top hits, drop those with none, best document first.
 
         Each group is (document, hits, mode of its index). Documents are ordered by the best hit's query-term coverage
-        (the fraction of distinct query words in its text), then by its score. Scores alone cannot rank documents:
-        they are in [0, 1] in both hybrid and BM25-only mode but are normalised per document, so not calibrated
-        across documents.
+        (the fraction of the query's match terms, its non-stopwords, in its text), then by its score. Scores alone cannot
+        rank documents: they are in [0, 1] in both hybrid and BM25-only mode but are normalised per document, so not
+        calibrated across documents.
 
         With a reranker, each document reranks its own candidates. A cross-encoder scores each (query, passage) pair on
         its own, so these scores are the same as reranking the merged list would give, and the tie-break compares like
         with like.
         """
-        terms = set(tokenize(query))
+        terms = match_terms(query)
 
         def coverage(hit: Hit) -> float:
             return len(terms & set(tokenize(hit.chunk.text))) / len(terms) if terms else 0.0

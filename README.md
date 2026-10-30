@@ -1,8 +1,12 @@
 # Semantic PDF Reader
 
+[![CI](https://github.com/fredwang1012/semantic-pdf-reader/actions/workflows/ci.yml/badge.svg)](https://github.com/fredwang1012/semantic-pdf-reader/actions/workflows/ci.yml)
+
 A PDF reader where you search by meaning instead of exact words. Upload a PDF, type a question, and the reader jumps
 to the page that answers it and highlights the passage. Search runs inside one document or across your whole library.
 Everything runs locally; nothing leaves your machine.
+
+![The reader with a question in the search box, three results in the sidebar, and the matching passage highlighted on the PDF page](docs/screenshot.png)
 
 ## Features
 
@@ -41,7 +45,7 @@ Settings come from the environment or a `.env` file at the repo root; see [.env.
    characters, so a chunk has a page to jump to.
 3. **Index.** Each chunk is scored with BM25Plus, scaled by the document's highest score. In hybrid mode each chunk
    also gets a cosine similarity against the query embedding, added with weight 0.6. Without embeddings, a chunk must
-   share at least one query term to count as a hit.
+   share at least one query word that is not a stopword (such as "the") to count as a hit.
 4. **Rerank (optional).** With `RERANK=auto`, the bge-reranker-v2-m3 cross-encoder re-scores the top 30 hits of step 3
    and results follow its scores. It only sees those hits, so the BM25 term rule still holds.
 5. **Highlights.** A hit carries `[page, x0, y0, x1, y1]` rectangles in PDF points. The viewer scales them by the page
@@ -71,7 +75,8 @@ cd backend  && py -3.12 -m uv run pytest -q
 cd frontend && npm test && npm run typecheck
 ```
 
-No test downloads a model or uses the network; embeddings and the reranker are faked.
+No test downloads a model or uses the network; embeddings and the reranker are faked. GitHub Actions runs the same
+checks, plus lint, on every push to `main` and every pull request.
 
 ## Limitations
 
