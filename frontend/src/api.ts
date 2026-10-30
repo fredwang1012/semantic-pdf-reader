@@ -27,11 +27,20 @@ export interface SearchResult {
 
 export interface DocSearch {
   mode: "hybrid" | "bm25";
+  /** The query words to mark in snippets: its non-stopwords, or all of them if it has only stopwords. */
+  terms: string[];
   results: SearchResult[];
 }
 
-export interface LibraryGroup extends DocSearch {
+export interface LibraryGroup {
   doc: DocMeta;
+  mode: "hybrid" | "bm25";
+  results: SearchResult[];
+}
+
+export interface LibrarySearch {
+  terms: string[];
+  groups: LibraryGroup[];
 }
 
 export class ApiError extends Error {
@@ -89,5 +98,4 @@ export const pdfUrl = (id: string) => `/api/docs/${encodeURIComponent(id)}/pdf`;
 export const searchDoc = (id: string, q: string, k?: number) =>
   request<DocSearch>(`/api/docs/${encodeURIComponent(id)}/search?${searchQuery(q, k)}`);
 
-export const searchLibrary = (q: string, k?: number) =>
-  request<{ groups: LibraryGroup[] }>(`/api/search?${searchQuery(q, k)}`).then((r) => r.groups);
+export const searchLibrary = (q: string, k?: number) => request<LibrarySearch>(`/api/search?${searchQuery(q, k)}`);

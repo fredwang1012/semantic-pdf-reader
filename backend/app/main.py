@@ -13,7 +13,7 @@ from .config import ROOT, settings
 from .embedder import get_embedder
 from .library import Library, NoTextLayer
 from .pdftext import PasswordProtected
-from .retrieval import DEFAULT_K, Hit
+from .retrieval import DEFAULT_K, Hit, match_terms
 
 app = FastAPI(title="Semantic PDF Reader")
 app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
@@ -85,11 +85,16 @@ def _results(hits: list[Hit]) -> list[dict]:
     return [{**h.chunk.to_json(), "score": round(h.score, 4)} for h in hits]
 
 
+def _terms(q: str) -> list[str]:
+    """The query words the frontend should mark in snippets: the same ones keyword matching uses."""
+    return sorted(match_terms(q))
+
+
 @app.get("/api/search")
 async def search_all(q: str = Query(min_length=1, max_length=500), k: int = Query(3, ge=1, le=20)):
     groups = await asyncio.to_thread(library().search_all, q, k)
-    return {"groups": [{"doc": meta.to_json(), "mode": mode, "results": _results(hits)}
-                       for meta, hits, mode in groups]}
+    return {"terms": _terms(q),
+            "groups": [{"doc": meta.to_json(), "mode": mode, "results": _results(hits)} for meta, hits, mode in groups]}
 
 
 @app.get("/api/docs/{doc_id}/search")
@@ -102,7 +107,7 @@ async def search(doc_id: str, q: str = Query(min_length=1, max_length=500), k: i
         mode, hits = await asyncio.to_thread(run)
     except KeyError:  # unknown id, or deleted while searching
         raise HTTPException(404, "no such document") from None
-    return {"mode": mode, "results": _results(hits)}
+    return {"mode": mode, "terms": _terms(q), "results": _results(hits)}
 
 
 # Windows maps .mjs to text/plain in the registry, and browsers refuse to run the pdf.js worker module under that type.
