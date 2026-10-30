@@ -1,5 +1,7 @@
 # Semantic PDF Reader
 
+[![CI](https://github.com/fredwang1012/semantic-pdf-reader/actions/workflows/ci.yml/badge.svg)](https://github.com/fredwang1012/semantic-pdf-reader/actions/workflows/ci.yml)
+
 A PDF reader where you search by meaning instead of exact words. Upload a PDF, type a question, and the reader jumps
 to the page that answers it and highlights the passage. Search runs inside one document or across your whole library.
 Everything runs locally; nothing leaves your machine.
@@ -66,7 +68,8 @@ cd backend  && py -3.12 -m uv run pytest -q
 cd frontend && npm test && npm run typecheck
 ```
 
-No test downloads a model or uses the network; embeddings are faked.
+No test downloads a model or uses the network; embeddings are faked. GitHub Actions runs the same checks, plus lint, on every
+push to `main` and every pull request.
 
 ## Limitations
 
