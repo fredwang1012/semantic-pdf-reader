@@ -1,7 +1,11 @@
 """Text lines with their page and bounding box, grouped into blocks, from a PDF's text layer (PyMuPDF).
 
-Coordinates are PDF points with a top-left origin, relative to the page's visible area: the same space pdf.js uses
-for a viewport at scale 1, so the frontend can draw a highlight by multiplying by its render scale.
+Coordinates are PDF points with a top-left origin, in the page as displayed: relative to the CropBox's top-left corner
+and after the page's /Rotate. That is the space of `page.rect` (the page sizes) and of pdf.js's viewport at scale 1
+(`page.getViewport({ scale: 1 })`), so the frontend draws a highlight by multiplying by its render scale. PyMuPDF
+reports text boxes in the unrotated page, so `display_bbox` turns them with the page's rotation matrix. Converting here
+rather than in the viewer keeps the viewer synchronous: it lays out pages and highlights from these numbers alone,
+before pdf.js has loaded a page.
 """
 import re
 from dataclasses import dataclass, field
@@ -58,6 +62,12 @@ def join_lines(texts: list[str]) -> str:
     return out
 
 
+def display_bbox(bbox, rotation_matrix: pymupdf.Matrix) -> tuple[float, float, float, float]:
+    """A box in PyMuPDF's unrotated page space, turned into the displayed page (see above) and rounded to 0.1 pt."""
+    r = pymupdf.Rect(bbox) * rotation_matrix
+    return round(r.x0, 1), round(r.y0, 1), round(r.x1, 1), round(r.y1, 1)
+
+
 def extract(source: bytes | str) -> tuple[list[Block], list[PageSize]]:
     """(text blocks in reading order, page sizes) from a PDF given as bytes or a path.
 
@@ -70,7 +80,7 @@ def extract(source: bytes | str) -> tuple[list[Block], list[PageSize]]:
         if doc.needs_pass:
             raise PasswordProtected("password-protected PDFs are not supported")
         for pno, page in enumerate(doc, start=1):
-            rect = page.rect
+            rect, rotation = page.rect, page.rotation_matrix
             sizes.append(PageSize(width=rect.width, height=rect.height))
             data = page.get_text("dict", sort=True)
             for b in data["blocks"]:
@@ -81,9 +91,7 @@ def extract(source: bytes | str) -> tuple[list[Block], list[PageSize]]:
                     text = "".join(span["text"] for span in ln["spans"])
                     if not text.strip():
                         continue
-                    x0, y0, x1, y1 = ln["bbox"]
-                    block.lines.append(Line(page=pno, bbox=(round(x0, 1), round(y0, 1), round(x1, 1), round(y1, 1)),
-                                            text=text))
+                    block.lines.append(Line(page=pno, bbox=display_bbox(ln["bbox"], rotation), text=text))
                 if block.lines and not _PAGE_NUMBER.match(block.text):
                     blocks.append(block)
     return blocks, sizes

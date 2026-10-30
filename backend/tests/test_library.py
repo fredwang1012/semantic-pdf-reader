@@ -1,9 +1,12 @@
+import json
 import time
 
+import pymupdf
 import pytest
 
 from app.config import settings
-from app.library import Library, NoTextLayer
+from app.library import INDEX_VERSION, Library, NoTextLayer
+from app.pdftext import display_bbox
 
 from .conftest import FakeEmbedder, make_pdf
 
@@ -166,3 +169,35 @@ def test_add_discards_its_temp_folder_when_the_final_one_appears_first(lib, monk
     monkeypatch.setattr(Library, "get", blind_get)
     assert lib.add(data, "b.pdf").id == first.id
     assert [f.name for f in lib.root.iterdir()] == [first.id]
+
+
+def test_new_entries_record_the_index_version(lib, sample_pdf):
+    meta = lib.add(sample_pdf, "a.pdf")
+    assert meta.index_version == INDEX_VERSION
+    assert json.loads((lib.root / meta.id / "meta.json").read_text())["index_version"] == INDEX_VERSION
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 270])
+def test_a_version_1_index_gets_its_boxes_turned_when_loaded(lib, rotation):
+    """Folders written before index_version existed hold boxes in the unrotated page; they still highlight correctly."""
+    data = make_pdf(rotation=rotation)
+    meta = lib.add(data, "turned.pdf")
+    expected = [c.rects for c in lib.index(meta.id).chunks]
+    d = lib.root / meta.id
+    with pymupdf.open(stream=data) as doc:
+        derotate = [page.derotation_matrix for page in doc]
+    old = json.loads((d / "chunks.json").read_text(encoding="utf-8"))
+    for c in old:
+        c["rects"] = [[r[0], *display_bbox(r[1:], derotate[r[0] - 1])] for r in c["rects"]]
+    (d / "chunks.json").write_text(json.dumps(old), encoding="utf-8")
+    old_meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
+    del old_meta["index_version"]
+    (d / "meta.json").write_text(json.dumps(old_meta), encoding="utf-8")
+
+    again = Library(lib.root)
+    assert again.get(meta.id).index_version == 1
+    got = [c.rects for c in again.index(meta.id).chunks]
+    assert len(got) == len(expected)
+    for g, e in zip(got, expected):
+        assert [r[0] for r in g] == [r[0] for r in e]
+        assert sum(g, []) == pytest.approx(sum(e, []), abs=0.21)
