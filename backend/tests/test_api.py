@@ -97,8 +97,15 @@ def test_library_search_ranks_fuller_matches_first(client):
     assert [g["doc"]["id"] for g in groups] == [full["id"], partial["id"]]
 
 
+def test_search_returns_the_terms_to_mark_without_stopwords(client, sample_pdf):
+    doc = _upload(client, sample_pdf).json()
+    one = client.get(f"/api/docs/{doc['id']}/search", params={"q": "what is the Adam optimizer"}).json()
+    assert one["terms"] == ["adam", "optimizer"]
+    assert client.get("/api/search", params={"q": "the Adam"}).json()["terms"] == ["adam"]
+
+
 def test_library_search_empty_library_and_validation(client):
-    assert client.get("/api/search", params={"q": "x"}).json() == {"groups": []}
+    assert client.get("/api/search", params={"q": "x"}).json() == {"terms": ["x"], "groups": []}
     assert client.get("/api/search", params={"q": ""}).status_code == 422
     assert client.get("/api/search", params={"q": "x", "k": 21}).status_code == 422
 
