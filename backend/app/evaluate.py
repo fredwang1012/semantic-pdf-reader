@@ -1,6 +1,7 @@
 """Retrieval eval harness: recall@k, MRR, latency and index size per retriever over a hand-labelled question set.
 
-Run: python -m app.evaluate <pdf folder> <questions.jsonl> [--k 1 3 5 10] [--retrievers bm25 hybrid] [--json out.json]
+Run: python -m app.evaluate <pdf folder> <questions.jsonl> [--k 1 3 5 10] [--retrievers bm25 hybrid hybrid+rerank]
+     [--json out.json]
 Everything is built in memory; nothing is written to the library's data folder.
 """
 import argparse
@@ -15,7 +16,8 @@ from typing import Callable
 from .chunks import Chunk, make_chunks
 from .embedder import get_embedder
 from .pdftext import extract
-from .retrieval import Hit, Index
+from .reranker import get_reranker
+from .retrieval import Hit, Index, Reranker
 
 DEFAULT_KS = [1, 3, 5, 10]
 
@@ -62,20 +64,34 @@ class Unavailable(Exception):
 Builder = Callable[[list[Chunk]], Index]
 
 
-def _bm25() -> Builder:
-    return lambda chunks: Index(chunks)
+def _bm25(reranker: Reranker | None = None) -> Builder:
+    return lambda chunks: Index(chunks, reranker=reranker)
 
 
-def _hybrid() -> Builder:
+def _hybrid(reranker: Reranker | None = None) -> Builder:
     embedder = get_embedder()
     if embedder is None:
-        raise Unavailable("hybrid skipped: no embedder (embeddings are off or sentence-transformers is not "
-                          "installed; uv sync --extra embed)")
-    return lambda chunks: Index(chunks, embedder.embed_passages([c.text for c in chunks]) if chunks else None, embedder)
+        raise Unavailable("no embedder (embeddings are off or sentence-transformers is not installed; "
+                          "uv sync --extra embed)")
+    return lambda chunks: Index(chunks, embedder.embed_passages([c.text for c in chunks]) if chunks else None, embedder,
+                                reranker)
+
+
+def _reranked(first_stage: Callable[[Reranker], Builder]) -> Callable[[], Builder]:
+    """The first stage followed by the cross-encoder reranker."""
+    def factory() -> Builder:
+        reranker = get_reranker()
+        if reranker is None:
+            raise Unavailable("no reranker (RERANK is off or sentence-transformers is not installed; set RERANK=auto "
+                              "and uv sync --extra embed)")
+        return first_stage(reranker)
+    return factory
 
 
 # Name -> factory returning a per-document index builder (or raising Unavailable). A visual retriever plugs in here.
-RETRIEVERS: dict[str, Callable[[], Builder]] = {"bm25": _bm25, "hybrid": _hybrid}
+RETRIEVERS: dict[str, Callable[[], Builder]] = {
+    "bm25": _bm25, "hybrid": _hybrid, "bm25+rerank": _reranked(_bm25), "hybrid+rerank": _reranked(_hybrid),
+}
 
 
 # --- running ----------------------------------------------------------------------------------------------------
@@ -180,7 +196,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             builder = RETRIEVERS[name]()
         except Unavailable as e:
-            print(f"warning: {e}", file=sys.stderr)
+            print(f"warning: {name} skipped: {e}", file=sys.stderr)
             continue
         results.append(run_retriever(name, builder, chunks_by_file, questions, sorted(set(args.k))))
     if not results:

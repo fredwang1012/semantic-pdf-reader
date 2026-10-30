@@ -18,7 +18,7 @@ import pymupdf
 
 from .chunks import Chunk, make_chunks
 from .pdftext import display_bbox, extract, title_of
-from .retrieval import Embedder, Hit, Index, match_terms, tokenize
+from .retrieval import Embedder, Hit, Index, Reranker, match_terms, tokenize
 
 DOC_ID = re.compile(r"^[0-9a-f]{16}$")
 # Version 1 stored line boxes in the unrotated page, which misplaced highlights on rotated pages; version 2 stores them
@@ -59,9 +59,10 @@ def _rotate_v1_rects(chunks: list[Chunk], pdf: Path) -> None:
 
 
 class Library:
-    def __init__(self, root: Path, embedder: Embedder | None = None):
+    def __init__(self, root: Path, embedder: Embedder | None = None, reranker: Reranker | None = None):
         self.root = root
         self.embedder = embedder
+        self.reranker = reranker
         self._indexes: dict[str, Index] = {}
         self._add_locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
@@ -156,16 +157,20 @@ class Library:
                 _rotate_v1_rects(chunks, d / "doc.pdf")
             emb_path = d / "embeddings.npy"
             emb = np.load(emb_path) if emb_path.is_file() else None
-            self._indexes[id_] = Index(chunks, emb, self.embedder)
+            self._indexes[id_] = Index(chunks, emb, self.embedder, self.reranker)
         return self._indexes[id_]
 
     def search_all(self, query: str, k_per_doc: int = 3, max_docs: int = 10) -> "list[tuple[DocMeta, list[Hit], str]]":
         """Search every document; keep each one's top hits, drop those with none, best document first.
 
         Each group is (document, hits, mode of its index). Documents are ordered by the best hit's query-term coverage
-        (the fraction of the query's match terms, its non-stopwords, in its text), then by its score. Scores alone cannot rank documents:
-        they are in [0, 1] in both hybrid and BM25-only mode but are normalised per document, so not calibrated
-        across documents.
+        (the fraction of the query's match terms, its non-stopwords, in its text), then by its score. Scores alone cannot
+        rank documents: they are in [0, 1] in both hybrid and BM25-only mode but are normalised per document, so not
+        calibrated across documents.
+
+        With a reranker, each document reranks its own candidates. A cross-encoder scores each (query, passage) pair on
+        its own, so these scores are the same as reranking the merged list would give, and the tie-break compares like
+        with like.
         """
         terms = match_terms(query)
 

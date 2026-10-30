@@ -12,7 +12,8 @@ Everything runs locally; nothing leaves your machine.
 
 - **Jump to the passage.** A result opens the page and draws a highlight over the matching lines in the pdf.js view.
 - **Hybrid search.** BM25 keyword scoring, plus multilingual-e5 embeddings when the `embed` extra is installed.
-  Paraphrased questions and questions in another language still find the right page.
+  Paraphrased questions and questions in another language still find the right page. An optional cross-encoder
+  reranker re-scores the top candidates.
 - **Library-wide search.** Results are grouped by document, with the documents that cover the most query terms first.
 - **Scanned PDFs are rejected** at upload with a clear message, since there is no text layer to search.
 
@@ -33,8 +34,9 @@ also run `cd frontend && npm run dev` and open http://localhost:5173 (Vite proxi
 `READER_API` for another backend URL).
 
 Settings come from the environment or a `.env` file at the repo root; see [.env.example](.env.example). They are
-`EMBED` (`auto` or `off`), `DATA_DIR`, `MAX_UPLOAD_MB` and `CORS_ORIGINS`. `GET /api/health` reports whether search is
-running as `hybrid` or `bm25`.
+`EMBED` (`auto` or `off`), `RERANK` (`off` or `auto`; off by default, the reranker model is large and slow on CPU),
+`DATA_DIR`, `MAX_UPLOAD_MB` and `CORS_ORIGINS`. `GET /api/health` reports whether search is running as `hybrid` or
+`bm25`, and whether reranking is on.
 
 ## How it works
 
@@ -44,12 +46,16 @@ running as `hybrid` or `bm25`.
 3. **Index.** Each chunk is scored with BM25Plus, scaled by the document's highest score. In hybrid mode each chunk
    also gets a cosine similarity against the query embedding, added with weight 0.6. Without embeddings, a chunk must
    share at least one query word that is not a stopword (such as "the") to count as a hit.
-4. **Highlights.** A hit carries `[page, x0, y0, x1, y1]` rectangles in PDF points, measured on the page as displayed
+4. **Rerank (optional).** With `RERANK=auto`, the bge-reranker-v2-m3 cross-encoder re-scores the top 30 hits of step 3
+   and results follow its scores. It only sees those hits, so the BM25 term rule still holds.
+5. **Highlights.** A hit carries `[page, x0, y0, x1, y1]` rectangles in PDF points, measured on the page as displayed
    (after its `/Rotate`, from the top-left of its CropBox). The viewer scales them by the page zoom and draws them over
    the pdf.js canvas.
 
 Each PDF is stored in its own folder under `data/docs/`, named by the file's hash, so uploading the same file twice
-reuses the existing entry. A library search ranks documents by how many query terms they cover, then by score.
+reuses the existing entry. A library search ranks documents by how many query terms they cover, then by score. With
+reranking on, each document reranks its own hits; a cross-encoder scores each passage on its own, so these scores can
+be compared across documents.
 
 ```
 backend/    FastAPI app (app/), tests, eval harness (eval/)
@@ -59,8 +65,9 @@ data/       uploaded PDFs and indexes (gitignored)
 
 ## Evaluating retrieval
 
-`backend/app/evaluate.py` compares BM25 and hybrid retrieval on a hand-labelled question set (recall@k and MRR, with
-latency percentiles). Setup and commands are in [backend/eval/README.md](backend/eval/README.md).
+`backend/app/evaluate.py` compares BM25 and hybrid retrieval, each with or without the reranker, on a hand-labelled
+question set (recall@k and MRR, with latency percentiles). Setup and commands are in
+[backend/eval/README.md](backend/eval/README.md).
 
 ## Tests
 
@@ -69,14 +76,15 @@ cd backend  && py -3.12 -m uv run pytest -q
 cd frontend && npm test && npm run typecheck
 ```
 
-No test downloads a model or uses the network; embeddings are faked. GitHub Actions runs the same checks, plus lint, on every
-push to `main` and every pull request.
+No test downloads a model or uses the network; embeddings and the reranker are faked. GitHub Actions runs the same
+checks, plus lint, on every push to `main` and every pull request.
 
 ## Limitations
 
 - No OCR. A PDF without a text layer is rejected.
 - Without the `embed` extra, search is keyword-based only.
 - Scores are not calibrated across documents, so library search ranks documents by query-term coverage first.
+- Reranking scores up to 30 passages per document, so a library search with it slows down as the library grows.
 - Highlights are upright boxes around each line, so text set at an angle other than a multiple of 90 degrees gets a
   box around its whole slant.
 
@@ -84,7 +92,7 @@ push to `main` and every pull request.
 
 - Run the eval on the CSC2626 Week 5 papers and publish the numbers.
 - Compare against ColQwen visual retrieval.
-- Add a reranker.
+- ~~Add a reranker.~~ Done as an opt-in stage (`RERANK=auto`); include it in the eval numbers.
 - Answers with citations, reusing the arXiv paper RAG project.
 
 ## License

@@ -6,7 +6,7 @@ from app import evaluate
 from app.chunks import Chunk
 from app.retrieval import Hit
 
-from .conftest import FakeEmbedder, make_pdf
+from .conftest import FakeEmbedder, FakeReranker, make_pdf
 
 
 def hit(*pages: int) -> Hit:
@@ -89,7 +89,8 @@ def test_hybrid_skipped_without_embedder(tmp_path, capsys):
     assert evaluate.main([str(folder), str(questions), "--k", "1"]) == 0
     captured = capsys.readouterr()
     assert "hybrid skipped" in captured.err
-    assert "bm25" in captured.out and "hybrid" not in captured.out
+    assert "bm25+rerank skipped: no reranker" in captured.err and "hybrid+rerank skipped" in captured.err
+    assert [r.split("|")[1].strip() for r in captured.out.splitlines()[2:]] == ["bm25"]
 
 
 def test_hybrid_with_injected_embedder(tmp_path, capsys, monkeypatch):
@@ -99,3 +100,26 @@ def test_hybrid_with_injected_embedder(tmp_path, capsys, monkeypatch):
     rows = capsys.readouterr().out.splitlines()[2:]
     assert [r.split("|")[1].strip() for r in rows] == ["bm25", "hybrid"]
     assert int(rows[1].split("|")[-2]) > 0   # embedding bytes
+
+
+def test_rerank_retrievers_run_with_injected_models(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(evaluate, "get_embedder", FakeEmbedder)
+    monkeypatch.setattr(evaluate, "get_reranker", lambda: FakeReranker("momentum"))  # always prefers page 2
+    folder, questions = _setup(tmp_path)
+    out = tmp_path / "out.json"
+    assert evaluate.main([str(folder), str(questions), "--k", "1", "3", "--json", str(out)]) == 0
+    rows = capsys.readouterr().out.splitlines()[2:]
+    assert [r.split("|")[1].strip() for r in rows] == ["bm25", "hybrid", "bm25+rerank", "hybrid+rerank"]
+    ranks = {r["retriever"]: [q["rank"] for q in r["ranks"]] for r in json.loads(out.read_text(encoding="utf-8"))}
+    assert ranks["bm25"] == [1, 1]
+    assert ranks["hybrid+rerank"] == [2, 1]
+    # the page 2 chunk shares only stopwords with question 1, so BM25-only search never offers it to the reranker
+    assert ranks["bm25+rerank"] == [1, 1]
+
+
+def test_hybrid_rerank_needs_the_embedder_too(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(evaluate, "get_reranker", lambda: FakeReranker("momentum"))
+    folder, questions = _setup(tmp_path)
+    assert evaluate.main([str(folder), str(questions), "--retrievers", "hybrid+rerank"]) == 1
+    err = capsys.readouterr().err
+    assert "hybrid+rerank skipped: no embedder" in err and "no retriever ran" in err

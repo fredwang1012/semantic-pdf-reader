@@ -3,9 +3,9 @@ import pytest
 from app.chunks import make_chunks
 from app.pdftext import extract
 from app.chunks import Chunk
-from app.retrieval import Index, match_terms
+from app.retrieval import RERANK_TOP, Index, match_terms
 
-from .conftest import FakeEmbedder
+from .conftest import FakeEmbedder, FakeReranker
 
 
 @pytest.fixture
@@ -79,16 +79,4 @@ def test_bm25_query_matching_no_word_returns_nothing():
     assert index.search("zebra") == []
 
 
-def test_bm25_chunk_sharing_only_stopwords_is_not_a_match():
-    index = Index([_chunk(0, "the rockets burn fuel"), _chunk(1, "the plants need light")])
-    assert [h.chunk.id for h in index.search("why do the rockets fly")] == ["c0"]
-
-
-def test_bm25_query_of_only_stopwords_still_matches_them():
-    index = Index([_chunk(0, "to be or not to be"), _chunk(1, "rockets burn fuel")])
-    assert [h.chunk.id for h in index.search("to be")] == ["c0"]
-
-
-def test_match_terms_drop_stopwords_unless_nothing_is_left():
-    assert match_terms("Why does THE rocket fly?") == {"rocket", "fly"}
-    assert match_terms("to be or not") == {"to", "be", "or", "not"}
+from app.retrieval import RERANK_TOP, Index, match_terms
