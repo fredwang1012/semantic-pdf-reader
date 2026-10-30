@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     data_dir: Path = ROOT / "data"
     # auto: multilingual-e5 embeddings when the "embed" extra is installed, else BM25 only. off: always BM25 only.
     embed: Literal["auto", "off"] = "auto"
+    # auto: rerank the top candidates with a cross-encoder when the "embed" extra is installed. Off by default: the
+    # model is large (about 570M parameters) and slow on CPU.
+    rerank: Literal["off", "auto"] = "off"
     max_upload_mb: int = 100
     # Comma-separated browser origins allowed by CORS (the built frontend is served same-origin and needs none).
     cors_origins: str = "http://localhost:5173"

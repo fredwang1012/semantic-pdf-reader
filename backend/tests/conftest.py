@@ -3,6 +3,7 @@ import pymupdf
 import pytest
 
 from app.config import settings
+from app.retrieval import tokenize
 
 # Two pages on unrelated topics, so a search can be checked by the page it lands on.
 PAGE_TEXTS = [
@@ -64,10 +65,23 @@ class FakeEmbedder:
         return np.stack([self._vec(t) for t in texts])
 
 
+class FakeReranker:
+    """Scores a passage by how often `word` occurs in it, whatever the query, so it can disagree with the first stage.
+    Records every passage it is shown."""
+    def __init__(self, word: str):
+        self.word = word
+        self.seen: list[str] = []
+
+    def score(self, query: str, texts: list[str]) -> np.ndarray:
+        self.seen.extend(texts)
+        return np.array([tokenize(t).count(self.word) for t in texts], dtype=float)
+
+
 @pytest.fixture(autouse=True)
 def _isolated_data_dir(monkeypatch, tmp_path):
-    """Every test gets its own library folder and never loads the real embedding model."""
+    """Every test gets its own library folder and never loads the real embedding or reranker model."""
     monkeypatch.setattr(settings, "data_dir", tmp_path / "data")
     monkeypatch.setattr(settings, "embed", "off")
+    monkeypatch.setattr(settings, "rerank", "off")
     from app import main
     monkeypatch.setattr(main, "_library", None)

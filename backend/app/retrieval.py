@@ -1,6 +1,7 @@
 """Hybrid search over one document's chunks: BM25 (scaled by the document's best raw score) blended with cosine similarity.
 
-Falls back to BM25 alone when the document has no embeddings or no embedder is loaded.
+Falls back to BM25 alone when the document has no embeddings or no embedder is loaded. With a reranker, a cross-encoder
+re-scores the first stage's top candidates.
 """
 import re
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from .chunks import Chunk
 
 DEFAULT_K = 8
 W_EMBED, W_BM25 = 0.6, 0.4
+RERANK_TOP = 30  # first-stage candidates the reranker sees
 
 _WORD = re.compile(r"\w+", re.UNICODE)
 
@@ -44,6 +46,10 @@ class Embedder(Protocol):
     def embed_passages(self, texts: list[str]) -> np.ndarray: ...
 
 
+class Reranker(Protocol):
+    def score(self, query: str, texts: list[str]) -> np.ndarray: ...
+
+
 @dataclass
 class Hit:
     chunk: Chunk
@@ -51,8 +57,10 @@ class Hit:
 
 
 class Index:
-    def __init__(self, chunks: list[Chunk], embeddings: np.ndarray | None = None, embedder: Embedder | None = None):
+    def __init__(self, chunks: list[Chunk], embeddings: np.ndarray | None = None, embedder: Embedder | None = None,
+                 reranker: Reranker | None = None):
         self.chunks = chunks
+        self.reranker = reranker
         usable = embeddings is not None and embedder is not None and len(embeddings) == len(chunks)
         self.embeddings = embeddings if usable else None
         self.embedder = embedder if usable else None
@@ -79,13 +87,24 @@ class Index:
         return W_EMBED * cos + W_BM25 * bm_norm
 
     def search(self, query: str, k: int = DEFAULT_K) -> list[Hit]:
-        """Top-k chunks, best first. BM25-only search returns only chunks that contain a query word."""
+        """Top-k chunks, best first. BM25-only search returns only chunks that contain a query word.
+
+        With a reranker, the top RERANK_TOP first-stage hits are re-scored by it and its scores are returned.
+        """
         if not self.chunks or not query.strip():
             return []
         s = self.scores(query)
-        order = np.argsort(-s, kind="stable")[:k]
+        order = np.argsort(-s, kind="stable")[:max(k, RERANK_TOP) if self.reranker else k]
         if self.mode == "bm25":
             # BM25Plus gives absent terms a constant positive score, so a score says nothing about a match
             terms = match_terms(query)
             order = [i for i in order if self._words[i] & terms]
-        return [Hit(self.chunks[i], float(s[i])) for i in order]
+        hits = [Hit(self.chunks[i], float(s[i])) for i in order]
+        return self._rerank(query, hits, k) if self.reranker else hits
+
+    def _rerank(self, query: str, hits: list[Hit], k: int) -> list[Hit]:
+        """Reorder first-stage hits by the reranker; it only sees hits, so a filtered-out chunk never comes back."""
+        if not hits:
+            return []
+        r = np.asarray(self.reranker.score(query, [h.chunk.text for h in hits]), dtype=float)
+        return [Hit(hits[i].chunk, float(r[i])) for i in np.argsort(-r, kind="stable")[:k]]

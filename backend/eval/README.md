@@ -1,6 +1,7 @@
 # Retrieval eval
 
-Compares retrievers (BM25, hybrid BM25 + multilingual-e5, later a visual one) on a hand-labelled question set.
+Compares retrievers (BM25, hybrid BM25 + multilingual-e5, each with or without a cross-encoder reranker, later a
+visual one) on a hand-labelled question set.
 
 ## Build the question set
 
@@ -28,6 +29,14 @@ py -3.12 -m uv run python -m app.evaluate eval eval/questions.jsonl --k 1 3 5 10
 
 `hybrid` needs the embedding model (`py -3.12 -m uv sync --extra embed`, and the `EMBED` setting not `off`);
 without it, it is skipped with a message and only BM25 is reported.
+
+`bm25+rerank` and `hybrid+rerank` add the bge-reranker-v2-m3 cross-encoder over the first stage's top 30 hits. They
+need the same extra and `RERANK=auto` (off by default; the first run downloads about 2.3 GB). Without the reranker
+they are skipped with a message. To compare with and without it, set `RERANK=auto` in `.env` and run:
+
+```
+py -3.12 -m uv run python -m app.evaluate eval eval/questions.jsonl --retrievers hybrid hybrid+rerank
+```
 
 The output is a Markdown table with recall@k, MRR, median and p95 query latency, index build time and index size
 (chunk count, embedding bytes). A question whose PDF is missing or has no text layer is reported as a warning and
